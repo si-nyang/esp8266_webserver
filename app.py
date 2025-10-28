@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Flask, jsonify, render_template, send_from_directory, request
 from requests.auth import HTTPBasicAuth
 
-from src.get_weather import get_weather_data  # (기존)
+from src.get_weather import get_weather_data  # ← 분리된 모듈
 from src.get_ai_summary import generate_ai_summary  # (신규)
 
 app = Flask(__name__)
@@ -14,8 +14,8 @@ app = Flask(__name__)
 # ─────────────────────────────────────────────────────────────
 # ESP 설정
 # ─────────────────────────────────────────────────────────────
-# ESP_IP = '172.20.10.3'  # 핫스팟일 경우 ESP에서 출력한 IP와 동일해야 함
-ESP_IP = '125.189.93.101:80'  # 핫스팟이 아닐 경우 라우터의 공인 IP를 입력해야 함 + 포트
+# ESP_IP = '172.20.10.3'  # 핫스팟일 경우
+ESP_IP = '125.189.93.101:80'  # 라우터 공인 IP + 포트
 account = 'admin'
 password = 'esp12f'
 
@@ -37,7 +37,7 @@ def _cached_weather(hour_key: str):
 # ─────────────────────────────────────────────────────────────
 # AI Summary 캐시 (TTL + 값 서명)
 # ─────────────────────────────────────────────────────────────
-AI_CACHE_TTL_SECONDS = 300  # 5분 (원하면 120~900 사이로 조절)
+AI_CACHE_TTL_SECONDS = 300  # 5분
 _ai_summary_cache = {
     "key": None,  # hour_key|snapshot_sig
     "at": 0.0,
@@ -46,10 +46,7 @@ _ai_summary_cache = {
 
 
 def _snapshot_sig(snap: dict) -> str:
-    """
-    스냅샷 핵심 수치만 뽑아 '서명(signature)' 생성.
-    숫자는 반올림해 소수점 미세 변화에 캐시가 깨지지 않도록 함.
-    """
+    """스냅샷 핵심 수치만 뽑아 서명 생성."""
 
     def _num(v, nd=1):
         try:
@@ -69,16 +66,35 @@ def _snapshot_sig(snap: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# ESP 프록시 helper (타임아웃/에러 처리 보강)
+# ─────────────────────────────────────────────────────────────
+def _esp_get(path: str, timeout=(2, 3)):
+    """(connect, read) 타임아웃으로 ESP에 안전하게 요청"""
+    url = f"http://{ESP_IP}{path}"
+    return requests.get(url,
+                        auth=HTTPBasicAuth(account, password),
+                        timeout=timeout)
+
+
+# ─────────────────────────────────────────────────────────────
+# Global after_request (브라우저 캐시 금지)
+# ─────────────────────────────────────────────────────────────
+@app.after_request
+def no_store(resp):
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    return resp
+
+
+# ─────────────────────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────────────────────
 @app.route("/")
 def home():
-    """최초 렌더링 시 ESP에서 snapshot을 받아 index.html 렌더"""
+    """최초 렌더링 시 ESP에서 snapshot 받아 index.html 렌더"""
     try:
-        content = requests.get(f'http://{ESP_IP}/snapshot',
-                               auth=HTTPBasicAuth(account, password),
-                               timeout=1)
-        data = content.json()
+        r = _esp_get("/snapshot")
+        r.raise_for_status()
+        data = r.json()
     except Exception:
         data = {
             "Temperature": "--",
@@ -88,27 +104,34 @@ def home():
             "GammaAverage1m": "--",
             "GammaAverage10m": "--"
         }
-
     return render_template("index.html", snapshot=data)
 
 
 @app.route('/snapshot', methods=['GET'])
 def getSnapshotHandler():
-    """브라우저에서 호출하는 프록시: ESP의 /snapshot을 그대로 중계"""
-    content = requests.get(f'http://{ESP_IP}/snapshot',
-                           auth=HTTPBasicAuth(account, password),
-                           timeout=0.5)
-    return content.json()
+    """브라우저에서 호출하는 프록시: ESP의 /snapshot 중계"""
+    try:
+        r = _esp_get("/snapshot")
+        r.raise_for_status()
+        return jsonify(r.json()), 200
+    except Exception:
+        return jsonify({"error": "esp_unreachable"}), 502
 
 
 @app.route("/api/weather")
 def api_weather():
     """
-    기상청 API → (hourly, daily, now) 구조를 반환.
+    기상청 API → (hourly, daily, now) 구조 반환.
     내부적으로 1시간 키(lru_cache)로 캐시하고, 실패 시 마지막 정상값 반환.
+    강제 리프레시: ?force=1
     """
     global _last_good_weather
     hour_key = datetime.now().strftime("%Y%m%d%H")
+    force = request.args.get("force") == "1"
+
+    if force:
+        _cached_weather.cache_clear()
+
     try:
         hourly, daily, now = _cached_weather(hour_key)
         payload = {
@@ -118,20 +141,46 @@ def api_weather():
             "stale": False
         }
         _last_good_weather = payload
-        return jsonify(payload)
-    except Exception as e:
-        app.logger.exception("weather api failed")
+        return jsonify(payload), 200
+    except Exception:
         if _last_good_weather:
             return jsonify({
                 **_last_good_weather, "stale": True,
-                "error": str(e)
+                "error": "upstream_timeout"
             }), 200
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "upstream_timeout"}), 502
+
+
+@app.route("/api/daily", strict_slashes=False)
+def api_daily():
+    """일별 예보만 반환. 강제 리프레시: ?force=1"""
+    global _last_good_weather
+    hour_key = datetime.now().strftime("%Y%m%d%H")
+    force = request.args.get("force") == "1"
+
+    if force:
+        _cached_weather.cache_clear()
+
+    try:
+        _, daily, _ = _cached_weather(hour_key)
+        payload = {"daily": daily, "stale": False}
+        if _last_good_weather:
+            _last_good_weather["daily"] = daily
+            _last_good_weather["stale"] = False
+        return jsonify(payload), 200
+    except Exception:
+        if _last_good_weather and "daily" in _last_good_weather:
+            return jsonify({
+                "daily": _last_good_weather.get("daily", {}),
+                "stale": True,
+                "error": "upstream_timeout"
+            }), 200
+        return jsonify({"error": "upstream_timeout"}), 502
 
 
 @app.route('/weathericons/<path:filename>')
 def serve_icon(filename):
-    """정적 아이콘 라우터(필요 시 경로 맞춰서 사용)"""
+    """정적 아이콘 라우터"""
     return send_from_directory('static/Image/', filename)
 
 
@@ -140,10 +189,9 @@ def ai_summary_route():
     force = request.args.get("force") == "1"
 
     try:
-        content = requests.get(f"http://{ESP_IP}/snapshot",
-                               auth=HTTPBasicAuth(account, password),
-                               timeout=1)
-        snapshot = content.json()
+        r = _esp_get("/snapshot")
+        r.raise_for_status()
+        snapshot = r.json()
     except Exception:
         snapshot = {}
 
@@ -161,13 +209,27 @@ def ai_summary_route():
     if (not force and _ai_summary_cache["key"] == cache_key
             and (now_ts - _ai_summary_cache["at"]) <= AI_CACHE_TTL_SECONDS
             and _ai_summary_cache["data"] is not None):
-        return _ai_summary_cache["data"]
+        return jsonify(_ai_summary_cache["data"]), 200
 
     loc = "서울시 마포구"
     result = generate_ai_summary(snapshot, weather, loc)
 
     _ai_summary_cache.update({"key": cache_key, "at": now_ts, "data": result})
-    return result
+    return jsonify(result), 200
+
+
+# 디버깅용 (선택)
+@app.route("/__routes")
+def __routes():
+    return jsonify(sorted([str(r) for r in app.url_map.iter_rules()]))
+
+
+@app.route("/api/ping")
+def api_ping():
+    return jsonify({
+        "ok": True,
+        "now": datetime.now().isoformat(timespec="seconds")
+    })
 
 
 # ─────────────────────────────────────────────────────────────
