@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask 웹서버 - 홈</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <h1 class="logo">Flask 웹서버</h1>
+            <ul class="nav-menu">
+                <li><a href="/" class="active">홈</a></li>
+                <li><a href="/about">소개</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container">
+        <section class="hero">
+            <h2>Flask 웹 애플리케이션에 오신 것을 환영합니다!</h2>
+            <p>Python Flask를 사용하여 만든 간단한 웹서버입니다.</p>
+        </section>
+
+        <section class="features">
+            <div class="feature-card">
+                <h3>⚡ 빠른 성능</h3>
+                <p>Flask의 가벼운 프레임워크로 빠른 응답 속도를 제공합니다.</p>
+            </div>
+            <div class="feature-card">
+                <h3>🎨 깔끔한 디자인</h3>
+                <p>모던하고 반응형 디자인으로 모든 기기에서 잘 작동합니다.</p>
+            </div>
+            <div class="feature-card">
+                <h3>🔧 쉬운 확장</h3>
+                <p>필요에 따라 기능을 쉽게 추가하고 확장할 수 있습니다.</p>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Flask 웹서버. All rights reserved.</p>
+        </div>
+    </footer>
+</body>
+</html>
