@@ -160,7 +160,7 @@ def ai_summary_route():
     if (not force and _ai_summary_cache["key"] == cache_key
             and (now_ts - _ai_summary_cache["at"]) <= AI_CACHE_TTL_SECONDS
             and _ai_summary_cache["data"] is not None):
-        return _ai_summary_cache["data"] + "\n(캐시된 결과)"
+        return _ai_summary_cache["data"]
 
     loc = "서울시 마포구"
     result = generate_ai_summary(snapshot, weather, loc)
