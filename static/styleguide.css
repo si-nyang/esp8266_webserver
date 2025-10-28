@@ -1,0 +1,92 @@
+/* 디자인 변수: 색상, 폰트, 여백 */
+
+/* styleguide.css */
+
+:root {
+  /* ===== Primitive palette (기본 팔레트) ===== */
+  --c-app-bg: #f1f2f4; /* 페이지 배경 */
+  --c-surface: #f9fafb; /* 일반 패널 배경 */
+  --c-surface-alt: #e7ebf0; /* 카드/내부 블록용 밝은 회색 */
+  --c-surface-dark: #2b2f33; /* 다크 패널(날씨 등) */
+  --c-surface-darker: #202329; /* 더 어두운 카드 */
+  --c-chip: #3b4148; /* 칩/피ill 배경 */
+
+  --c-text-strong: #1f2328;
+  --c-text: #2f343a;
+  --c-text-muted: #7a828d;
+
+  --c-border-soft: #d2d6dc;
+  --c-border-dark: #383c43;
+
+  /* Indoor의 블루/민트 계열 포인트 컬러 */
+  --c-primary-300: #a8e1ea;
+  --c-primary-400: #6abbe4;
+  --c-primary-500: #4fa1d9;
+
+  /* Hour Today 강조용 라이트 블루 그라디언트 */
+  --c-today-start: #dceffd;
+  --c-today-end: #b3defa;
+
+  /* 공통 효과 */
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* ===== Semantic tokens (컴포넌트 의미별) ===== */
+  --appbar-bg: var(--c-surface-dark);
+  --appbar-fg: #f4f7fb;
+
+  --panel-bg: var(--c-surface);
+  --panel-bg-dark: var(--c-surface-dark);
+  --panel-border: var(--c-border-soft);
+
+  --text-strong: var(--c-text-strong);
+  --text: var(--c-text);
+  --text-muted: var(--c-text-muted);
+
+  --primary-500: var(--c-primary-500);
+  --primary-400: var(--c-primary-400);
+  --primary-300: var(--c-primary-300);
+
+  --card-bg: var(--c-surface-alt);
+  --chip-bg: var(--c-chip);
+
+  /* Weather */
+  --hour-bg: #185e89;
+  --hour-fg: #ffffff;
+  --hour-today-start: var(--c-today-start);
+  --hour-today-end: var(--c-today-end);
+  --hour-today-fg: var(--c-text-strong);
+
+  /* Daily */
+  --daycard-bg: #f5f7fa;
+
+  --panel-sub-bg: #e7ebf0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-app-bg: #1f2226;
+    --c-surface: #292d31;
+    --c-surface-alt: #2f3439;
+    --c-surface-dark: #202329;
+    --c-surface-darker: #171a1e;
+    --c-chip: #23262a;
+
+    --c-text-strong: #f4f7fb;
+    --c-text: #e1e5eb;
+    --c-text-muted: #9aa0a8;
+
+    --c-border-soft: #383c43;
+
+    --c-primary-300: #aee9ef;
+    --c-primary-400: #7cd0e9;
+    --c-primary-500: #59b3e3;
+
+    --hour-bg: #2c3035;
+    --hour-fg: #f5f7fa;
+    --days-bg: #2a2e33;
+    --daycard-bg: #202329;
+    --daycard-fg: #f1f3f6;
+  }
+}

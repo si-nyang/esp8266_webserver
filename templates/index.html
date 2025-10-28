@@ -1,48 +1,209 @@
 <!DOCTYPE html>
 <html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flask 웹서버 - 홈</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body>
-    <nav class="navbar">
-        <div class="container">
-            <h1 class="logo">Flask 웹서버</h1>
-            <ul class="nav-menu">
-                <li><a href="/" class="active">홈</a></li>
-                <li><a href="/about">소개</a></li>
-            </ul>
+  <!-- header -->
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MetaHome | Weather & Indoor Dashboard</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='global.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='styleguide.css') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <!-- appbar -->
+    <header class="appbar container">
+      <div class="brand">MetaHome</div>
+      <div class="spacer"></div>
+      <div class="now-time" id="now-time">--</div>
+      <div class="divider"></div>
+      <div class="now-date" id="now-date">--</div>
+    </header>
+
+    <!-- container: Indoor + AI summary + weather -->
+    <main class="shell container">
+      <!-- Left column: Indoor + AI Summary -->
+      <div class="left-col">
+        <!-- indoor panel -->
+        <section class="panel indoor" aria-labelledby="indoorTitle">
+          <h2 id="indoorTitle" class="panel-title">Indoor Environment</h2>
+          <div class="indoor-grid">
+            <!-- Temperature 측정 카드-->
+            <article class="metric-card">
+              <div class="metric-icon">
+                <img
+                  src="{{ url_for('static', filename='Image/General/Temperature.png') }}"
+                  alt="Temperature icon"
+                />
+              </div>
+              <div class="metric-main">
+                <p class="metric-name">Temperature</p>
+                <p class="metric-value">
+                  <span id="temp-value">{{ snapshot.Temperature }}</span>
+                  <span class="unit">℃</span>
+                </p>
+              </div>
+            </article>
+            <!-- Humidity 측정 카드-->
+            <article class="metric-card">
+              <div class="metric-icon">
+                <img
+                  src="{{ url_for('static', filename='Image/General/Water.png') }}"
+                  alt="Humidity icon"
+                />
+              </div>
+              <div class="metric-main">
+                <p class="metric-name">Humidity</p>
+                <p class="metric-value">
+                  <span id="humidity-value">{{ snapshot.Humidity }}</span>
+                  <span class="unit">%</span>
+                </p>
+              </div>
+            </article>
+            <!-- Radiation 측정 카드-->
+            <article class="metric-card metric-card--dual">
+              <div class="metric-icon">
+                <img
+                  src="{{ url_for('static', filename='Image/General/Radiation.png') }}"
+                  alt="Radiation icon"
+                />
+              </div>
+              <div class="metric-main">
+                <p class="metric-name">Radiation</p>
+                <div class="metric-values">
+                  <div class="metric-row">
+                    <span class="metric-avg">1M avg</span>
+                    <span class="metric-value">
+                      <span id="gamma1m-value"
+                        >{{ snapshot.GammaAverage1m }}</span
+                      >
+                      <span class="unit">uSv/hr</span>
+                    </span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-avg">10M avg</span>
+                    <span class="metric-value">
+                      <span id="gamma10m-value"
+                        >{{ snapshot.GammaAverage10m }}</span
+                      >
+                      <span class="unit">uSv/hr</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </article>
+            <!-- Dust 측정 카드-->
+            <article class="metric-card metric-card--dual">
+              <div class="metric-icon">
+                <img
+                  src="{{ url_for('static', filename='Image/General/Facemask.png') }}"
+                  alt="Dust icon"
+                />
+              </div>
+              <div class="metric-main">
+                <p class="metric-name">Dust</p>
+
+                <div class="metric-values">
+                  <div class="metric-row">
+                    <span class="metric-avg">PM2.5</span>
+                    <span class="metric-value">
+                      <span id="pm2_5-value">{{ snapshot.PM2_5 }}</span>
+                      <span class="unit">ug/m3</span>
+                    </span>
+                  </div>
+                  <div class="metric-row">
+                    <span class="metric-avg">PM10</span>
+                    <span class="metric-value">
+                      <span id="pm10-value">{{ snapshot.PM10 }}</span>
+                      <span class="unit">ug/m3</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </section>
+        <!-- ai panel -->
+        <section class="panel ai-summary" aria-labelledby="aiTitle">
+          <h2 id="aiTitle" class="panel-title">AI Summary</h2>
+          <div class="ai-box" aria-live="polite" aria-atomic="true">
+            <p class="placeholder">요약이 여기에 표시됩니다.</p>
+          </div>
+        </section>
+      </div>
+
+      <!-- Right column: Weather -->
+      <section class="panel weather" aria-labelledby="weatherTitle">
+        <div class="weather-top">
+          <!-- location -->
+          <div class="location-pill">
+            <span class="pin">
+              <img
+                src="{{ url_for('static', filename='Image/General/Location.png') }}"
+                alt="Location icon"
+              />
+            </span>
+            <span id="loc-text">서울 마포구</span>
+          </div>
+          <!-- hero = today's weather -->
+          <div class="hero">
+            <!-- 날짜 -->
+            <div class="date-block">
+              <div class="weekday">Sunday</div>
+              <div class="date">04 Aug, 2025</div>
+            </div>
+
+            <!-- 날씨 아이콘 -->
+            <div class="icon-block">
+              <img id="hero-icon" alt="Weather icon" />
+            </div>
+
+            <!-- 오른쪽 현재 온도 + 체감온도 -->
+            <div class="weather-block">
+              <div class="temp-now">
+                <span class="value">28°</span>
+                <span class="label">NOW</span>
+              </div>
+
+              <div class="temp-highlow">
+                <span class="high">32°</span>
+                <span class="slash"> / </span>
+                <span class="low">24°</span>
+              </div>
+            </div>
+          </div>
         </div>
-    </nav>
-
-    <main class="container">
-        <section class="hero">
-            <h2>Flask 웹 애플리케이션에 오신 것을 환영합니다!</h2>
-            <p>Python Flask를 사용하여 만든 간단한 웹서버입니다.</p>
-        </section>
-
-        <section class="features">
-            <div class="feature-card">
-                <h3>⚡ 빠른 성능</h3>
-                <p>Flask의 가벼운 프레임워크로 빠른 응답 속도를 제공합니다.</p>
-            </div>
-            <div class="feature-card">
-                <h3>🎨 깔끔한 디자인</h3>
-                <p>모던하고 반응형 디자인으로 모든 기기에서 잘 작동합니다.</p>
-            </div>
-            <div class="feature-card">
-                <h3>🔧 쉬운 확장</h3>
-                <p>필요에 따라 기능을 쉽게 추가하고 확장할 수 있습니다.</p>
-            </div>
-        </section>
+        <!-- hourly data -->
+        <div id="hourly" class="hourly"></div>
+        <!-- days data -->
+        <div class="days" id="days"></div>
+      </section>
     </main>
 
-    <footer>
-        <div class="container">
-            <p>&copy; 2025 Flask 웹서버. All rights reserved.</p>
-        </div>
+    <!-- footer -->
+    <footer class="container footer">
+      <small>© 2025 MetaHome · Prototype UI</small>
     </footer>
-</body>
+
+    <script src="{{ url_for('static', filename='js/getIconPath.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/fetchSnapshot.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/time_loc.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/buildHours.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/buildDays.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/buildNow.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/getAISummary.js') }}"></script>
+  </body>
 </html>
