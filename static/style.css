@@ -620,6 +620,7 @@ body {
   }
 }
 
+
 /* === Daily 레이아웃 안정화 패치 === */
 
 /* 카드가 2열로 놓이려면 이 너비는 확보돼야 예쁘게 유지됩니다.
@@ -778,4 +779,21 @@ body {
   background: var(--chip-bg, #eef2f6);
   color: #334155;
   margin-right: 0.4rem;
+}
+
+/* ==============================
+   Indoor cards 2×2 → 1×4 layout
+============================== */
+
+/* 데스크탑: 기존 2열 유지
+   모바일(≤640px): 1열 전환 */
+@media (max-width: 640px) {
+  .indoor-grid {
+    grid-template-columns: 1fr; /* 한 줄짜리 단일 열 (즉, 4행) */
+    row-gap: 1.2rem; /* 위아래 카드 간격 살짝 */
+  }
+
+  .metric-card {
+    width: 100%; /* 카드가 패널 가로폭 꽉 채우도록 */
+  }
 }
