@@ -65,13 +65,13 @@
 
 ## 3. Block Diagram (시스템 블록 다이어그램)
 
-![Block Diagram.drawio.png](Block_Diagram.drawio.png)
+![Block Diagram.drawio.png](./sad_img/Block_Diagram.drawio.png)
 
 ---
 
 ## 4. Software Architecture
 
-![Software Architecture.drawio.png](Software_Architecture.drawio.png)
+![Software Architecture.drawio.png](./sad_img/Software_Architecture.drawio.png)
 
 ---
 
