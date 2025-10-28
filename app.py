@@ -65,37 +65,44 @@ def _snapshot_sig(snap: dict) -> str:
 # ─────────────────────────────────────────────────────────────
 # Routes
 # ─────────────────────────────────────────────────────────────
+@app.route("/health")
+def health():
+    """Health check endpoint for deployment (fast response)"""
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/")
 def home():
-    """최초 렌더링 시 ESP에서 snapshot을 받아 index.html 렌더"""
+    """최초 렌더링 - 플레이스홀더 데이터로 빠르게 응답, ESP 데이터는 JavaScript로 비동기 로드"""
+    data = {
+        "Temperature": "--",
+        "Humidity": "--",
+        "PM2_5": "--",
+        "PM10": "--",
+        "GammaAverage1m": "--",
+        "GammaAverage10m": "--"
+    }
+    return render_template("index.html", snapshot=data)
+
+@app.route('/snapshot', methods=['GET'])
+def getSnapshotHandler():
+    """브라우저에서 호출하는 프록시: ESP의 /snapshot을 그대로 중계"""
     try:
         content = requests.get(
             f'http://{ESP_IP}/snapshot',
             auth=HTTPBasicAuth(account, password),
-            timeout=1
+            timeout=0.5
         )
-        data = content.json()
-    except Exception:
-        data = {
+        return content.json()
+    except Exception as e:
+        app.logger.warning(f"ESP device unavailable: {e}")
+        return jsonify({
             "Temperature": "--",
             "Humidity": "--",
             "PM2_5": "--",
             "PM10": "--",
             "GammaAverage1m": "--",
             "GammaAverage10m": "--"
-        }
-
-    return render_template("index.html", snapshot=data)
-
-@app.route('/snapshot', methods=['GET'])
-def getSnapshotHandler():
-    """브라우저에서 호출하는 프록시: ESP의 /snapshot을 그대로 중계"""
-    content = requests.get(
-        f'http://{ESP_IP}/snapshot',
-        auth=HTTPBasicAuth(account, password),
-        timeout=0.5
-    )
-    return content.json()
+        }), 200
 
 @app.route("/api/weather")
 def api_weather():
