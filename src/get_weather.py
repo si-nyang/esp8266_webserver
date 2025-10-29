@@ -84,28 +84,15 @@ def http_get(url, timeout=(3.05, 10.0)):
 
 
 # ─────────────────────────────────────────────────────────────
-# ※ 변경 1) 단기예보 base_time 계산을 '8개 발표 슬롯' 기준으로 수정
-#    (02,05,08,11,14,17,20,23 중 '현재 시각 이전의 가장 최근 슬롯')
+# base_time 계산: hourly와 daily 모두 0200 또는 2300만 사용
+# - KMA는 TMN/TMX를 0200에만 발표
+# - hourly도 동일한 base_time을 사용하여 일관성 유지
+# - 현재 시각이 02시 이전이면 전날 2300, 02시 이후면 당일 0200
 # ─────────────────────────────────────────────────────────────
-_SHORTTERM_SLOTS = [2, 5, 8, 11, 14, 17, 20, 23]
-
-
-def get_base_hourly(now_kst: datetime):
-    """hourly 데이터용: 현재 시각 이전의 가장 최근 발표 기준시"""
-    # 현재 시각 이전의 가장 최근 발표 기준시
-    for h in reversed(_SHORTTERM_SLOTS):
-        cand = now_kst.replace(hour=h, minute=0, second=0, microsecond=0)
-        if cand <= now_kst:
-            return cand.strftime("%Y%m%d"), f"{h:02d}00"
-    # 자정~02:00 사이인 경우 전날 23:00
-    prev_day = now_kst - timedelta(days=1)
-    return prev_day.strftime("%Y%m%d"), "2300"
-
-
-def get_base_daily(now_kst: datetime):
+def get_base_time(now_kst: datetime):
     """
-    daily 데이터(TMN/TMX)용: 항상 0200 또는 2300만 사용
-    - TMN/TMX는 0200에만 발표되므로 정확한 값을 얻기 위함
+    hourly/daily 모두 사용하는 통합 base_time 계산
+    - 항상 0200 또는 2300만 사용
     - 현재 시각이 02시 이전이면 전날 2300 발표본 사용
     - 그 외에는 당일 0200 발표본 사용
     """
@@ -117,6 +104,17 @@ def get_base_daily(now_kst: datetime):
     else:
         # 02:00 이후: 당일 0200
         return now_kst.strftime("%Y%m%d"), "0200"
+
+
+# 하위 호환성을 위한 alias
+def get_base_hourly(now_kst: datetime):
+    """hourly 데이터용 base_time (get_base_time과 동일)"""
+    return get_base_time(now_kst)
+
+
+def get_base_daily(now_kst: datetime):
+    """daily 데이터용 base_time (get_base_time과 동일)"""
+    return get_base_time(now_kst)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -136,9 +134,9 @@ def fetch_vilage_json(base_date_hourly, base_time_hourly):
 
 
 # ─────────────────────────────────────────────────────────────
-# ※ 변경 2) hourly 빌드: '현재시각 이후 N시간'을 안정적으로 수집
+# hourly 빌드: 현재시각 이후 N시간의 예보 데이터 수집
 #    - TMP/PTY/SKY만 모아 키(fcstDate+fcstTime)별 dict 구성
-#    - now 기준 가장 가까운 슬롯부터 최대 hours_ahead까지
+#    - now 기준 가장 가까운 시간부터 최대 hours_ahead까지
 # ─────────────────────────────────────────────────────────────
 def build_hourly_data(items, now_kst_key, hours_ahead=16):
     if not items:
@@ -363,7 +361,7 @@ def pick_best_hour_key(hourly_data, preferred_key):
 def get_weather_data():
     now_kst = datetime.now(KST)
 
-    # hourly용 base time (8개 슬롯 기준)
+    # hourly용 base time (0200 또는 2300)
     base_date_hourly, base_time_hourly = get_base_hourly(now_kst)
 
     # hourly
