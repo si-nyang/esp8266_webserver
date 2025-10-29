@@ -404,8 +404,17 @@ def get_weather_data():
     now_obj["TMX"] = daily_data.get(today_key, {}).get("TMX")
     now_obj["TMN"] = daily_data.get(today_key, {}).get("TMN")
 
-    # 오늘의 TMN/TMX가 없으면 hourly 데이터에서 계산
-    if hourly_data:
+    # ─────────────────────────────────────────────────────────────
+    # TMN/TMX 폴백 로직:
+    # - 단기예보에서 TMN/TMX는 오전 2시(baseTime=0200)에만 발표됨
+    # - 오전 2시 이후에는 당일 TMN/TMX가 null로 나옴
+    # - 이 경우 hourly 데이터에서 당일의 기온을 확인하여 최저/최고 계산
+    # 
+    # 주의: hourly_data는 현재 시각 이후의 예보만 포함하므로
+    #       새벽 시간대 기온을 놓칠 수 있음 (차선책)
+    #       가장 정확한 값은 오전 2시 발표 기준
+    # ─────────────────────────────────────────────────────────────
+    if hourly_data and (now_obj["TMN"] is None or now_obj["TMX"] is None):
         today_temps = []
         for key, data in hourly_data.items():
             if key.startswith(today_key) and data.get("TMP"):
@@ -416,14 +425,22 @@ def get_weather_data():
                     pass
         
         if today_temps:
+            calculated_min = str(round(min(today_temps), 1))
+            calculated_max = str(round(max(today_temps), 1))
+            
+            # now_obj 업데이트
             if now_obj["TMN"] is None:
-                now_obj["TMN"] = str(min(today_temps))
-                if today_key in daily_data:
-                    daily_data[today_key]["TMN"] = str(min(today_temps))
+                now_obj["TMN"] = calculated_min
             if now_obj["TMX"] is None:
-                now_obj["TMX"] = str(max(today_temps))
-                if today_key in daily_data:
-                    daily_data[today_key]["TMX"] = str(max(today_temps))
+                now_obj["TMX"] = calculated_max
+            
+            # daily_data도 업데이트 (일관성 유지)
+            if today_key not in daily_data:
+                daily_data[today_key] = {}
+            if daily_data[today_key].get("TMN") is None:
+                daily_data[today_key]["TMN"] = calculated_min
+            if daily_data[today_key].get("TMX") is None:
+                daily_data[today_key]["TMX"] = calculated_max
 
     print(
         f"[weather] base={base_date} {base_time}, hourly={len(hourly_data)} slots, "
