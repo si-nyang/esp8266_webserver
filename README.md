@@ -202,7 +202,7 @@
 |  | AM2320 GND |  |  |
 |  | GDK101 GND |  |  |
 |  | PM-G7 GND |  |  |
-|  | ST7789V GND |  | 모든 장치 공통 GND 필요 |
+|  | ST7789V GND |  | 모든 장치 공통 GND |
 | **D0 (GPIO16)** | ST7789V RST | Reset | 디스플레이 리셋 핀 |
 | **D1 (GPIO5)** | AM2320 SCL, GDK101 SCL | I²C SCL | I²C 클록 |
 | **D2 (GPIO4)** | AM2320 SDA, GDK101 SDA | I²C SDA | I²C 데이터 |
