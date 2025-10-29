@@ -87,8 +87,8 @@
 
     const tempNowEl = document.querySelector(".weather-block .temp-now .value");
     const nowLabelEl = document.querySelector(".weather-block .temp-now .label");
-    const tMaxEl = document.querySelector(".weather-block .temp-highlow .high");
     const tMinEl = document.querySelector(".weather-block .temp-highlow .low");
+    const tMaxEl = document.querySelector(".weather-block .temp-highlow .high");
     const staleBadgeEl = document.querySelector(".weather-block .stale-badge"); // 선택
     const lastUpdatedEl = document.querySelector(".last-updated"); // 선택
     const weatherBlock = document.querySelector(".weather-block");
@@ -134,8 +134,8 @@
           if (tmn === null) tmn = toInt(today.TMN);
         }
       }
-      tMaxEl.textContent = tmx !== null ? `${tmx}°` : "--";
       tMinEl.textContent = tmn !== null ? `${tmn}°` : "--";
+      tMaxEl.textContent = tmx !== null ? `${tmx}°` : "--";
 
       // 아이콘 (이미지 에러 시 fallback)
       const hour = nowLocal.getHours();
@@ -157,8 +157,8 @@
       console.warn("buildNow error:", e);
       if (nowLabelEl) nowLabelEl.textContent = "NOW";
       tempNowEl.textContent = "--";
-      tMaxEl.textContent = "--";
       tMinEl.textContent = "--";
+      tMaxEl.textContent = "--";
       if (staleBadgeEl) staleBadgeEl.style.display = "none";
       if (weatherBlock) weatherBlock.classList.remove("is-stale");
     }
