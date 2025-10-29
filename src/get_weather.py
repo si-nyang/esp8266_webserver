@@ -404,6 +404,27 @@ def get_weather_data():
     now_obj["TMX"] = daily_data.get(today_key, {}).get("TMX")
     now_obj["TMN"] = daily_data.get(today_key, {}).get("TMN")
 
+    # 오늘의 TMN/TMX가 없으면 hourly 데이터에서 계산
+    if hourly_data:
+        today_temps = []
+        for key, data in hourly_data.items():
+            if key.startswith(today_key) and data.get("TMP"):
+                try:
+                    temp = float(data.get("TMP"))
+                    today_temps.append(temp)
+                except (ValueError, TypeError):
+                    pass
+        
+        if today_temps:
+            if now_obj["TMN"] is None:
+                now_obj["TMN"] = str(min(today_temps))
+                if today_key in daily_data:
+                    daily_data[today_key]["TMN"] = str(min(today_temps))
+            if now_obj["TMX"] is None:
+                now_obj["TMX"] = str(max(today_temps))
+                if today_key in daily_data:
+                    daily_data[today_key]["TMX"] = str(max(today_temps))
+
     print(
         f"[weather] base={base_date} {base_time}, hourly={len(hourly_data)} slots, "
         f"daily={len(daily_data)} days, now_key={best_key}, now={now_obj}")
