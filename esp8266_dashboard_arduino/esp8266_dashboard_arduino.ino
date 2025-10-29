@@ -24,8 +24,8 @@
 
 // WiFi id, password key
 #ifndef STASSID
-#define STASSID "신양의 iPhone"
-#define STAPSK "sinyang721"
+#define STASSID "U+Net0627"
+#define STAPSK "82377710M!"
 #endif
 
 // client auth: request 보안용
@@ -305,13 +305,13 @@ void serverSet()
   WiFi.mode(WIFI_STA);
 
   // home config
-  // IPAddress local_IP(192, 168, 219, 50);   // 원하는 고정 IP (DHCP 범위와 충돌 안 나게)
-  // IPAddress gateway(192, 168, 219, 1);     // 공유기 주소
-  // IPAddress subnet(255, 255, 255, 0);      // 일반적인 서브넷
-  // IPAddress dns(8, 8, 8, 8);               // DNS (선택)
-  // if (!WiFi.config(local_IP, gateway, subnet, dns)) {
-  //   Serial.println("WiFi.config failed");
-  // }
+  IPAddress local_IP(192, 168, 219, 50);   // 원하는 고정 IP (DHCP 범위와 충돌 안 나게)
+  IPAddress gateway(192, 168, 219, 1);     // 공유기 주소
+  IPAddress subnet(255, 255, 255, 0);      // 일반적인 서브넷
+  IPAddress dns(8, 8, 8, 8);               // DNS (선택)
+  if (!WiFi.config(local_IP, gateway, subnet, dns)) {
+    Serial.println("WiFi.config failed");
+  }  
 
   WiFi.begin(ssid, password);
 
