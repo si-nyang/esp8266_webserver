@@ -16,7 +16,7 @@
 - **MCU 제어 및 표시**: Wemos D1 mini(ESP8266) + ST7789V TFT (320×240)
 - **디스플레이 인터페이스**: ESP8266 **HSPI(SPI)** ↔ ST7789V (MISO 미사용)
 - **서버 연동**: Flask 서버(현재 Replit 호스팅)와 HTTP 통신
-- **웹 대시보드 표시**: 실내 센서값 + 외부 날씨 + **AI 요약(text/plain)** 제공
+- **웹 대시보드 표시**: 실내 센서값 + 외부 날씨 + **AI 요약(application/json)** 제공
 - **원격 접속**: ESP8266은 STA 모드로 공유기에 연결 후 포트포워딩으로 외부 접근 허용
 - **단일 스케치 구조**: 센서 드라이버, UI, 네트워크 통신이 하나의 `.ino`에 통합됨
 
@@ -43,7 +43,7 @@
 | F5 | JSON 포맷 통신 | `{ "Temperature":24.5, ... }` |
 | F6 | Wi-Fi 연결(AP/STA) | `WiFi.softAP()`, `WiFi.begin()` |
 | F7 | 원격 접근 (포트포워딩) | WAN→LAN |
-| F8 | AI 요약 생성(text/plain) | OpenAI API |
+| F8 | AI 요약 생성(application/json) | OpenAI API, JSON 문자열 응답 |
 | **F9** | ST7789V를 **SPI(HSPI)** 로 구동 | `Adafruit_ST7789` |
 
 ### 2.2 비기능 요구사항
@@ -86,6 +86,10 @@
 | `st7789v.h` | SPI 핀·색상·좌표 상수 |
 | `src/get_weather.py` | Weather Adapter (KMA API + 캐시) |
 | `src/get_ai_summary.py` | AI 요약 생성 (OpenAI API) |
+| `static/js/buildNow.js` | 현재 날씨 UI 렌더링 (캐시 10분) |
+| `static/js/buildHours.js` | 시간별 예보 UI 렌더링 (최대 18시간) |
+| `static/js/buildDays.js` | 일별 예보 UI 렌더링 (fallback 지원) |
+| `static/js/getAISummary.js` | AI 요약 로드 및 표시 |
 
 ### 5.2 스케줄링
 
@@ -110,6 +114,31 @@
     - PM2.5 ≤15 OK / ≤35 WARN / >35 BAD
     - Radiation <0.3 OK / <0.6 WARN / ≥0.6 BAD
 
+### 5.6 클라이언트 JavaScript 구조
+
+**모듈 구성**
+
+| 파일 | 역할 | 특징 |
+| --- | --- | --- |
+| `buildNow.js` | 현재 날씨 표시 | 10분 캐시, TMN/TMX 폴백 로직 |
+| `buildHours.js` | 시간별 예보 | 최대 18시간, 현재 시각부터 표시 |
+| `buildDays.js` | 일별 예보 | /api/daily 우선, /api/weather 폴백 |
+| `getAISummary.js` | AI 요약 로드 | JSON 문자열/객체 모두 처리 |
+
+**공통 아키텍처 패턴**
+1. **구조**: 상수 → 헬퍼 함수 → 메인 함수 → 실행
+2. **스코프 격리**: IIFE `(function() { ... })()`로 전역 오염 방지
+3. **defer 호환성**: `document.readyState` 확인으로 안전한 초기화
+   ```javascript
+   if (document.readyState === "loading") {
+     document.addEventListener("DOMContentLoaded", buildFunction);
+   } else {
+     buildFunction();  // DOM 준비 완료 시 즉시 실행
+   }
+   ```
+4. **에러 처리**: `fetchWithRetry()` 재시도 로직, try-catch 방어
+5. **온도 표시**: 모든 섹션에서 **최저/최고** 순서 통일
+
 ---
 
 ## 6. Weather Adapter (KMA)
@@ -119,14 +148,27 @@
 - 캐시: `@lru_cache(maxsize=1)` + `_last_good_weather`
 - 실패 시 이전 정상값 반환(`stale:true`)
 
+**TMN/TMX 폴백 로직**
+- 기상청 API에서 당일 최저기온(TMN)은 새벽에만 발표되므로 이후 시간에는 null 반환
+- hourly 데이터에서 당일의 모든 기온을 확인하여 최저/최고 계산
+- 클라이언트(buildNow.js)에서도 now.TMX/TMN이 없으면 daily 데이터로 보강
+- 모든 UI에서 **최저/최고** 순서로 통일하여 일관성 유지
+
 ---
 
 ## 7. AI Summary (텍스트 요약)
 
-- 엔드포인트: `/ai-summary` → `text/plain; charset=utf-8`
+- 엔드포인트: `/ai-summary` → `application/json; charset=utf-8`
 - 입력: snapshot + weather + location("서울시 마포구")
-- 출력: 자연어 2–6 문장 요약
+- 출력: JSON 문자열 형태의 자연어 요약 (2–6 문장)
+  ```json
+  "현재 실내 온도는 24.4℃로 쾌적한 상태이며..."
+  ```
+- 클라이언트 처리: 
+  - `typeof data === "string"` → 텍스트 렌더링
+  - `typeof data === "object"` → JSON 객체 렌더링 (summary + tips)
 - 캐시 TTL = 5분
+- 브라우저 호환성: `replace(/pattern/g)` 사용 (replaceAll 미지원 대응)
 
 ---
 
