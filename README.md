@@ -193,10 +193,8 @@
 
 ![ST7789V Display](sad_img/esp8266_st7789v_img.png)
 
-- 1.3인치 240x240 컬러 TFT LCD
 - 실시간 센서 데이터 표시 (온도, 습도, 미세먼지, 방사능)
-- 기상청 날씨 정보 및 아이콘 표시
-- SPI 통신으로 ESP8266과 연결
+- NTP(Network Time Protocol)로 현재 시각 표시
 
 ### 웹 대시보드
 
