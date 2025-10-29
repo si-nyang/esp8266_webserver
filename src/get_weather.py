@@ -85,8 +85,8 @@ def http_get(url, timeout=(3.05, 10.0)):
 
 # ─────────────────────────────────────────────────────────────
 # base_time 계산
-# - hourly: 0200 또는 2300 (단기예보 발표 시간)
-# - daily: 0600 또는 1800 (중기예보 발표 시간)
+# - hourly: 0200 또는 2300 (단기예보 TMN/TMX 정확도 최대)
+# - daily: 0500 또는 1700 (중기예보 시간대 0600/1800에 가장 가까운 단기예보)
 # ─────────────────────────────────────────────────────────────
 def get_base_hourly(now_kst: datetime):
     """
@@ -106,18 +106,18 @@ def get_base_hourly(now_kst: datetime):
 
 def get_base_daily(now_kst: datetime):
     """
-    daily 데이터용 base_time: 0600 또는 1800 (중기예보 발표 시간)
-    - 현재 시각이 06시 이전이면 어제 1800 발표본 사용
-    - 그 외에는 당일 0600 발표본 사용
+    daily 데이터용 base_time: 0500 또는 1700 (중기예보 시간대에 가장 가까운 단기예보)
+    - 현재 시각이 06시 이전이면 어제 1700 발표본 사용
+    - 그 외에는 당일 0500 발표본 사용
     """
     current_hour = now_kst.hour
     if current_hour < 6:
-        # 자정~06:00 사이: 어제 1800
+        # 자정~06:00 사이: 어제 1700
         prev_day = now_kst - timedelta(days=1)
-        return prev_day.strftime("%Y%m%d"), "1800"
+        return prev_day.strftime("%Y%m%d"), "1700"
     else:
-        # 06:00 이후: 당일 0600
-        return now_kst.strftime("%Y%m%d"), "0600"
+        # 06:00 이후: 당일 0500
+        return now_kst.strftime("%Y%m%d"), "0500"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -376,11 +376,10 @@ def get_weather_data():
     except Exception:
         hourly_data = {}
 
-    # daily용 base time (0600 또는 1800 - 중기예보 발표 시간)
+    # daily용 base time (0500 또는 1700 - 중기예보 시간대에 가장 가까운 단기예보)
     base_date_daily, base_time_daily = get_base_daily(now_kst)
 
     # daily (day1~4): 단기 기온 + 육상(AM/PM SKY/PTY/ST)
-    # 중기예보 시간대에 맞춰 가장 최근 데이터 가져오기
     try:
         vilage_data_daily = fetch_vilage_json(base_date_daily, base_time_daily)
         daily_temp_in3day = build_daily_temp_in3day(vilage_data_daily, base_time_daily)
