@@ -91,6 +91,7 @@ _SHORTTERM_SLOTS = [2, 5, 8, 11, 14, 17, 20, 23]
 
 
 def get_base_hourly(now_kst: datetime):
+    """hourly 데이터용: 현재 시각 이전의 가장 최근 발표 기준시"""
     # 현재 시각 이전의 가장 최근 발표 기준시
     for h in reversed(_SHORTTERM_SLOTS):
         cand = now_kst.replace(hour=h, minute=0, second=0, microsecond=0)
@@ -99,6 +100,23 @@ def get_base_hourly(now_kst: datetime):
     # 자정~02:00 사이인 경우 전날 23:00
     prev_day = now_kst - timedelta(days=1)
     return prev_day.strftime("%Y%m%d"), "2300"
+
+
+def get_base_daily(now_kst: datetime):
+    """
+    daily 데이터(TMN/TMX)용: 항상 0200 또는 2300만 사용
+    - TMN/TMX는 0200에만 발표되므로 정확한 값을 얻기 위함
+    - 현재 시각이 02시 이전이면 전날 2300 발표본 사용
+    - 그 외에는 당일 0200 발표본 사용
+    """
+    current_hour = now_kst.hour
+    if current_hour < 2:
+        # 자정~02:00 사이: 전날 2300
+        prev_day = now_kst - timedelta(days=1)
+        return prev_day.strftime("%Y%m%d"), "2300"
+    else:
+        # 02:00 이후: 당일 0200
+        return now_kst.strftime("%Y%m%d"), "0200"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -345,22 +363,25 @@ def pick_best_hour_key(hourly_data, preferred_key):
 def get_weather_data():
     now_kst = datetime.now(KST)
 
-    # (변경) 8개 슬롯 기준으로 base date/time 산출
-    base_date, base_time = get_base_hourly(now_kst)
+    # hourly용 base time (8개 슬롯 기준)
+    base_date_hourly, base_time_hourly = get_base_hourly(now_kst)
 
     # hourly
     try:
-        vilage_data = fetch_vilage_json(base_date, base_time)
+        vilage_data_hourly = fetch_vilage_json(base_date_hourly, base_time_hourly)
         now_date = now_kst.strftime("%Y%m%d")
         now_hour = now_kst.strftime("%H00")
-        hourly_data = build_hourly_data(vilage_data, now_date + now_hour)
+        hourly_data = build_hourly_data(vilage_data_hourly, now_date + now_hour)
     except Exception:
-        vilage_data = []  # 뒤에서 기온 1~3일 사용 가능하도록 기본값
         hourly_data = {}
+
+    # daily용 base time (0200 또는 2300만 사용 - TMN/TMX 정확도 향상)
+    base_date_daily, base_time_daily = get_base_daily(now_kst)
 
     # daily (day1~4): 단기 기온 + 육상(AM/PM SKY/PTY/ST)
     try:
-        daily_temp_in3day = build_daily_temp_in3day(vilage_data, base_time)
+        vilage_data_daily = fetch_vilage_json(base_date_daily, base_time_daily)
+        daily_temp_in3day = build_daily_temp_in3day(vilage_data_daily, base_time_daily)
     except Exception:
         daily_temp_in3day = {}
     try:
@@ -406,13 +427,10 @@ def get_weather_data():
 
     # ─────────────────────────────────────────────────────────────
     # TMN/TMX 폴백 로직:
-    # - 단기예보에서 TMN/TMX는 오전 2시(baseTime=0200)에만 발표됨
-    # - 오전 2시 이후에는 당일 TMN/TMX가 null로 나옴
-    # - 이 경우 hourly 데이터에서 당일의 기온을 확인하여 최저/최고 계산
-    # 
-    # 주의: hourly_data는 현재 시각 이후의 예보만 포함하므로
-    #       새벽 시간대 기온을 놓칠 수 있음 (차선책)
-    #       가장 정확한 값은 오전 2시 발표 기준
+    # - daily 데이터는 항상 0200 또는 2300 발표본을 사용하므로
+    #   TMN/TMX가 정상적으로 제공되어야 함
+    # - 하지만 API 에러나 일시적 데이터 누락 시 대비하여
+    #   hourly 데이터에서 계산하는 폴백 로직 유지
     # ─────────────────────────────────────────────────────────────
     if hourly_data and (now_obj["TMN"] is None or now_obj["TMX"] is None):
         today_temps = []
@@ -443,6 +461,8 @@ def get_weather_data():
                 daily_data[today_key]["TMX"] = calculated_max
 
     print(
-        f"[weather] base={base_date} {base_time}, hourly={len(hourly_data)} slots, "
-        f"daily={len(daily_data)} days, now_key={best_key}, now={now_obj}")
+        f"[weather] hourly_base={base_date_hourly} {base_time_hourly}, "
+        f"daily_base={base_date_daily} {base_time_daily}, "
+        f"hourly={len(hourly_data)} slots, daily={len(daily_data)} days, "
+        f"now_key={best_key}, now={now_obj}")
     return hourly_data, daily_data, now_obj
