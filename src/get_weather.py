@@ -85,12 +85,13 @@ def http_get(url, timeout=(3.05, 10.0)):
 
 # ─────────────────────────────────────────────────────────────
 # base_time 계산
-# - hourly: 0200 또는 2300 (단기예보 TMN/TMX 정확도 최대)
-# - daily: 0500 또는 1700 (중기예보 시간대 0600/1800에 가장 가까운 단기예보)
+# - hourly & daily-3d: 0200 또는 2300 (단기예보 TMN/TMX 정확도 최대)
+# - daily-4d~: 0600 또는 1800 (중기예보)
 # ─────────────────────────────────────────────────────────────
-def get_base_hourly(now_kst: datetime):
+def get_base_shortterm(now_kst: datetime):
     """
-    hourly 데이터용 base_time: 0200 또는 2300
+    단기예보 base_time: 0200 또는 2300
+    - hourly와 daily(3일까지) 모두 사용
     - 현재 시각이 02시 이전이면 전날 2300 발표본 사용
     - 그 외에는 당일 0200 발표본 사용
     """
@@ -104,20 +105,21 @@ def get_base_hourly(now_kst: datetime):
         return now_kst.strftime("%Y%m%d"), "0200"
 
 
-def get_base_daily(now_kst: datetime):
+def get_base_midterm(now_kst: datetime):
     """
-    daily 데이터용 base_time: 0500 또는 1700 (중기예보 시간대에 가장 가까운 단기예보)
-    - 현재 시각이 06시 이전이면 어제 1700 발표본 사용
-    - 그 외에는 당일 0500 발표본 사용
+    중기예보 base_time: 0600 또는 1800
+    - daily(4일 이후) 사용
+    - 현재 시각이 06시 이전이면 어제 1800 발표본 사용
+    - 그 외에는 당일 0600 발표본 사용
     """
     current_hour = now_kst.hour
     if current_hour < 6:
-        # 자정~06:00 사이: 어제 1700
+        # 자정~06:00 사이: 어제 1800
         prev_day = now_kst - timedelta(days=1)
-        return prev_day.strftime("%Y%m%d"), "1700"
+        return prev_day.strftime("%Y%m%d"), "1800"
     else:
-        # 06:00 이후: 당일 0500
-        return now_kst.strftime("%Y%m%d"), "0500"
+        # 06:00 이후: 당일 0600
+        return now_kst.strftime("%Y%m%d"), "0600"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -364,25 +366,26 @@ def pick_best_hour_key(hourly_data, preferred_key):
 def get_weather_data():
     now_kst = datetime.now(KST)
 
-    # hourly용 base time (0200 또는 2300)
-    base_date_hourly, base_time_hourly = get_base_hourly(now_kst)
+    # 단기예보 base time (0200 또는 2300) - hourly & daily 3일까지 공용
+    base_date, base_time = get_base_shortterm(now_kst)
 
-    # hourly: 단기예보 데이터 fetch
+    # 단기예보 데이터 fetch (hourly & daily 3일까지 공용)
     try:
-        vilage_data_hourly = fetch_vilage_json(base_date_hourly, base_time_hourly)
+        vilage_data = fetch_vilage_json(base_date, base_time)
+    except Exception:
+        vilage_data = []
+
+    # hourly: 단기예보에서 TMP, SKY, PTY 추출
+    try:
         now_date = now_kst.strftime("%Y%m%d")
         now_hour = now_kst.strftime("%H00")
-        hourly_data = build_hourly_data(vilage_data_hourly, now_date + now_hour)
+        hourly_data = build_hourly_data(vilage_data, now_date + now_hour)
     except Exception:
         hourly_data = {}
 
-    # daily용 base time (0500 또는 1700 - 중기예보 시간대에 가장 가까운 단기예보)
-    base_date_daily, base_time_daily = get_base_daily(now_kst)
-
-    # daily (day1~4): 단기 기온 + 육상(AM/PM SKY/PTY/ST)
+    # daily (day1~3): 단기예보에서 TMX, TMN 추출 + 육상(AM/PM SKY/PTY/ST)
     try:
-        vilage_data_daily = fetch_vilage_json(base_date_daily, base_time_daily)
-        daily_temp_in3day = build_daily_temp_in3day(vilage_data_daily, base_time_daily)
+        daily_temp_in3day = build_daily_temp_in3day(vilage_data, base_time)
     except Exception:
         daily_temp_in3day = {}
     try:
@@ -392,15 +395,16 @@ def get_weather_data():
     daily_in3day = merge_daily_temp_sky(daily_temp_in3day, daily_sky_in3day) \
                    if (daily_temp_in3day or daily_sky_in3day) else {}
 
-    # daily (day5~8): 중기 기온 + 육상(AM/PM)
+    # 중기예보 base time (0600 또는 1800) - daily 4일 이후
+    midterm_base_date, midterm_base_time = get_base_midterm(now_kst)
+
+    # daily (day4~8): 중기 기온 + 육상(AM/PM)
     try:
-        daily_temp_after3day = build_daily_temp_after3day(
-            now_kst.strftime("%Y%m%d"))
+        daily_temp_after3day = build_daily_temp_after3day(midterm_base_date)
     except Exception:
         daily_temp_after3day = {}
     try:
-        daily_sky_after3day = build_daily_sky_after3day(
-            now_kst.strftime("%Y%m%d"))
+        daily_sky_after3day = build_daily_sky_after3day(midterm_base_date)
     except Exception:
         daily_sky_after3day = {}
     daily_after3day = merge_daily_temp_sky(daily_temp_after3day, daily_sky_after3day) \
@@ -462,8 +466,8 @@ def get_weather_data():
                 daily_data[today_key]["TMX"] = calculated_max
 
     print(
-        f"[weather] hourly_base={base_date_hourly} {base_time_hourly}, "
-        f"daily_base={base_date_daily} {base_time_daily}, "
+        f"[weather] shortterm_base={base_date} {base_time}, "
+        f"midterm_base={midterm_base_date} {midterm_base_time}, "
         f"hourly={len(hourly_data)} slots, daily={len(daily_data)} days, "
         f"now_key={best_key}, now={now_obj}")
     return hourly_data, daily_data, now_obj
