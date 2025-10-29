@@ -1,4 +1,5 @@
 // ===== helpers =====
+(() => {
 const K_WEEK = ["일", "월", "화", "수", "목", "금", "토"];
 
 function parseKeyToDate(k) {
@@ -11,14 +12,13 @@ function parseKeyToDate(k) {
   return new Date(y, m, d, H, M, 0, 0);
 }
 
-// 응답 정규화: /api/weather → {hourly:{}, stale}, 혹은 hourly 그 자체
 function normalizeHourly(payload) {
   if (!payload) return {};
   if (payload.hourly && typeof payload.hourly === "object") return payload.hourly;
   return payload;
 }
 
-// 레이블: offset=0이면 "현재", 날짜 바뀌면 "내일" 또는 요일, 그 외 "HH시"
+// 레이블: offset=0 → "현재", 날짜 바뀌면 "내일" 또는 요일, 그 외 "HH시"
 function makeHourLabel(nowDate, nowHour, offset, targetDt) {
   if (offset === 0) return "현재";
   const isOtherDay =
@@ -27,7 +27,6 @@ function makeHourLabel(nowDate, nowHour, offset, targetDt) {
     targetDt.getDate() !== nowDate.getDate();
 
   if (isOtherDay) {
-    // 내일이면 "내일", 그 외엔 요일
     const justDateA = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
     const justDateB = new Date(targetDt.getFullYear(), targetDt.getMonth(), targetDt.getDate());
     const diff = Math.round((justDateB - justDateA) / 86400000);
@@ -58,20 +57,49 @@ const toCelsius = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+// 아이콘 선택 (전역 getIconPath 없을 때 fallback)
+function pickIconSafe(sky, pty, hour) {
+  const fn =
+    (typeof window !== "undefined" && typeof window.getIconPath === "function" && window.getIconPath) ||
+    (typeof getIconPath === "function" ? getIconPath : null);
+  if (fn) return fn(sky, pty, hour);
+
+  const isDay = hour >= 6 && hour < 18;
+  const baseDir = `/weathericons/${isDay ? "Weather_day" : "Weather_night"}`;
+  const S = (sky || "").trim();
+  const P = (pty || "").trim();
+
+  let name = "overcast";
+  if (P && P !== "없음") {
+    const r = P.includes("비"), s = P.includes("눈");
+    name = r && s ? "overcast_rain_and_snow" : s ? "overcast_snow" : "overcast_rain";
+    if (S === "구름많음") name = r && s ? "cloudy_rain_and_snow" : s ? "cloudy_snow" : "cloudy_rain";
+  } else {
+    name = S === "맑음" ? "sunny" : S === "구름많음" ? "cloudy" : "overcast";
+  }
+  return `${baseDir}/${name}.png`;
+}
+
 // ===== main =====
 (async function buildHourlyFromAPI(limit = 18) {
   const hourlyEl = document.getElementById("hourly");
   if (!hourlyEl) return;
 
+  // limit 방어
+  const MAX = 24;
+  const count = Math.max(1, Math.min(limit || 18, MAX));
+
   try {
     const payload = await fetchWithRetry("/api/weather");
     if (payload.error) throw new Error(payload.error);
 
-    const hourly = normalizeHourly(payload);
+    const hourly = normalizeHourly(payload) || {};
     const stale = !!payload.stale;
 
+    // payload.hourly가 객체 형태({key: {TMP,SKY,PTY}})라고 가정
     const entries = Object.entries(hourly)
       .map(([k, v]) => ({ key: k, dt: parseKeyToDate(k), ...v }))
+      .filter((r) => r.dt instanceof Date && !isNaN(r.dt))
       .sort((a, b) => a.dt - b.dt);
 
     if (!entries.length) {
@@ -79,20 +107,23 @@ const toCelsius = (v) => {
       return;
     }
 
-    // 현재 시각을 시 단위 내림
+    // 현재 시각(시 단위 내림)
     const now = new Date();
     const nowFloor = new Date(now.getFullYear(), now.getMonth(), now.getDate(), now.getHours(), 0, 0, 0);
 
-    // 현재 시각 이상인 첫 슬롯 찾기(없으면 마지막으로)
+    // 현재 시각 이상인 첫 슬롯 (없으면 마지막으로)
     let startIdx = entries.findIndex((r) => r.dt >= nowFloor);
     if (startIdx === -1) startIdx = entries.length - 1;
 
-    const slice = entries.slice(startIdx, startIdx + Math.max(1, limit));
+    const slice = entries.slice(startIdx, startIdx + count);
 
-    // 렌더링
+    // 렌더링 시작
     hourlyEl.innerHTML = "";
+    hourlyEl.classList.toggle("is-stale", stale);
 
     // (옵션) stale 배지
+    const oldBadge = hourlyEl.querySelector(".stale-badge");
+    if (oldBadge) oldBadge.remove();
     if (stale) {
       const badge = document.createElement("div");
       badge.className = "stale-badge";
@@ -100,9 +131,9 @@ const toCelsius = (v) => {
       hourlyEl.appendChild(badge);
     }
 
+    // 카드들
     slice.forEach((r, i) => {
-      const iconFn = window.getIconPath || getIconPath; // 전역 보조
-      const icon = iconFn(r.SKY, r.PTY, r.dt.getHours());
+      const icon = pickIconSafe(r.SKY, r.PTY, r.dt.getHours());
       const label = makeHourLabel(nowFloor, now.getHours(), i, r.dt);
       const temp = toCelsius(r.TMP);
       const isNow = r.dt.getTime() === nowFloor.getTime();
@@ -118,8 +149,13 @@ const toCelsius = (v) => {
       const iconWrap = document.createElement("div");
       iconWrap.className = "icon";
       const img = document.createElement("img");
-      img.src = icon;
       img.alt = "Weather icon";
+      img.src = icon;
+      img.onerror = () => {
+        img.onerror = null;
+        const dayDir = now.getHours() >= 6 && now.getHours() < 18 ? "Weather_day" : "Weather_night";
+        img.src = `/weathericons/${dayDir}/overcast.png`;
+      };
       iconWrap.appendChild(img);
 
       const tempEl = document.createElement("div");
@@ -130,6 +166,7 @@ const toCelsius = (v) => {
       hourlyEl.appendChild(card);
     });
 
+    // 첫 카드로 스크롤 정렬
     hourlyEl.firstElementChild?.scrollIntoView({
       behavior: "auto",
       inline: "start",
@@ -143,4 +180,5 @@ const toCelsius = (v) => {
       </div>
     `;
   }
+})();
 })();

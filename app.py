@@ -1,15 +1,18 @@
 import json
 import time
+import threading
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import requests
-from functools import lru_cache
-from datetime import datetime
 from flask import Flask, jsonify, render_template, send_from_directory, request
 from requests.auth import HTTPBasicAuth
 
-from src.get_weather import get_weather_data  # ← 분리된 모듈
+from src.get_weather import get_weather_data  # ← (hourly, daily, now) 튜플 반환
 from src.get_ai_summary import generate_ai_summary  # (신규)
 
 app = Flask(__name__)
+KST = ZoneInfo("Asia/Seoul")
 
 # ─────────────────────────────────────────────────────────────
 # ESP 설정
@@ -20,22 +23,89 @@ account = 'admin'
 password = 'esp12f'
 
 # ─────────────────────────────────────────────────────────────
-# Weather 캐시 (1시간 키)
+# Weather 캐시 (엔드포인트별 TTL + 프리패치)
 # ─────────────────────────────────────────────────────────────
-_last_good_weather = None  # 마지막 정상 응답 저장용
+# now/hourly는 단기예보 기반(3시간 주기), daily는 중기(06/18시)지만
+# 한 번의 get_weather_data() 호출로 모두 갱신함.
+WEATHER_CACHE = {
+    "now": {
+        "t": 0.0,
+        "value": {}
+    },
+    "hourly": {
+        "t": 0.0,
+        "value": []
+    },
+    "daily": {
+        "t": 0.0,
+        "value": {}
+    },
+}
+# TTL: 단기 주기(3h) 기준으로 now/hourly는 3시간, daily는 6시간
+TTL_NOW_SEC = 3 * 3600
+TTL_HOURLY_SEC = 3 * 3600
+TTL_DAILY_SEC = 6 * 3600
+
+_last_good_weather = None  # 마지막 정상 응답(전체 페이로드) 저장
 
 
-@lru_cache(maxsize=1)
-def _cached_weather(hour_key: str):
-    """
-    hour_key는 캐시 키(YYYYMMDDHH)로만 사용.
-    get_weather_data()는 (hourly, daily, now) 튜플을 반환해야 함.
-    """
-    return get_weather_data()
+def _set_weather_cache(hourly, daily, now):
+    ts = time.time()
+    WEATHER_CACHE["hourly"] = {"t": ts, "value": hourly}
+    WEATHER_CACHE["daily"] = {"t": ts, "value": daily}
+    WEATHER_CACHE["now"] = {"t": ts, "value": now}
+
+
+def _weather_stale(key: str, ttl: int) -> bool:
+    entry = WEATHER_CACHE.get(key)
+    if not entry or entry["t"] == 0:
+        return True
+    return (time.time() - entry["t"]) > ttl
+
+
+def refresh_weather_all():
+    """한 번의 호출로 (hourly, daily, now) 업데이트. 실패 시 예외 throw."""
+    hourly, daily, now = get_weather_data()
+    _set_weather_cache(hourly, daily, now)
+    # _last_good_weather 업데이트는 라우트에서 만들 때 같이 반영
 
 
 # ─────────────────────────────────────────────────────────────
-# AI Summary 캐시 (TTL + 값 서명)
+# 단기예보 발표 주기 프리패치 스케줄러 (02,05,08,11,14,17,20,23시 +10분)
+# ─────────────────────────────────────────────────────────────
+_SHORTTERM_SLOTS = [2, 5, 8, 11, 14, 17, 20, 23]
+_PREFETCH_MINUTE = 10  # 발표 후 10분 여유
+
+
+def _seconds_until_next_shortterm():
+    now = datetime.now(KST)
+    today_targets = [
+        now.replace(hour=h, minute=_PREFETCH_MINUTE, second=0, microsecond=0)
+        for h in _SHORTTERM_SLOTS
+    ]
+    future = [t for t in today_targets if t > now]
+    nxt = future[0] if future else today_targets[0] + timedelta(days=1)
+    return max(1, int((nxt - now).total_seconds()))
+
+
+def _prefetch_loop():
+    """서버가 알아서 단기 주기에 맞춰 프리패치"""
+    while True:
+        try:
+            refresh_weather_all()
+            print("[prefetch] weather updated at", datetime.now(KST))
+        except Exception as e:
+            print("[prefetch] weather update failed:", e)
+        time.sleep(_seconds_until_next_shortterm())
+
+
+def start_prefetch_daemon():
+    t = threading.Thread(target=_prefetch_loop, daemon=True)
+    t.start()
+
+
+# ─────────────────────────────────────────────────────────────
+# AI Summary 캐시 (TTL + 값 서명) — 그대로 유지
 # ─────────────────────────────────────────────────────────────
 AI_CACHE_TTL_SECONDS = 300  # 5분
 _ai_summary_cache = {
@@ -46,7 +116,6 @@ _ai_summary_cache = {
 
 
 def _snapshot_sig(snap: dict) -> str:
-    """스냅샷 핵심 수치만 뽑아 서명 생성."""
 
     def _num(v, nd=1):
         try:
@@ -69,7 +138,6 @@ def _snapshot_sig(snap: dict) -> str:
 # ESP 프록시 helper (타임아웃/에러 처리 보강)
 # ─────────────────────────────────────────────────────────────
 def _esp_get(path: str, timeout=(2, 3)):
-    """(connect, read) 타임아웃으로 ESP에 안전하게 요청"""
     url = f"http://{ESP_IP}{path}"
     return requests.get(url,
                         auth=HTTPBasicAuth(account, password),
@@ -121,54 +189,63 @@ def getSnapshotHandler():
 @app.route("/api/weather")
 def api_weather():
     """
-    기상청 API → (hourly, daily, now) 구조 반환.
-    내부적으로 1시간 키(lru_cache)로 캐시하고, 실패 시 마지막 정상값 반환.
-    강제 리프레시: ?force=1
+    (hourly, daily, now) 묶음 반환.
+    - 캐시가 TTL 초과면 즉시 갱신 시도(동기), 실패 시 마지막 정상값 반환.
+    - 강제 리프레시: ?force=1
     """
     global _last_good_weather
-    hour_key = datetime.now().strftime("%Y%m%d%H")
     force = request.args.get("force") == "1"
 
     if force:
-        _cached_weather.cache_clear()
+        # 강제 새로고침
+        try:
+            refresh_weather_all()
+        except Exception:
+            pass
 
-    try:
-        hourly, daily, now = _cached_weather(hour_key)
-        payload = {
-            "now": now,
-            "hourly": hourly,
-            "daily": daily,
-            "stale": False
-        }
-        _last_good_weather = payload
-        return jsonify(payload), 200
-    except Exception:
-        if _last_good_weather:
-            return jsonify({
-                **_last_good_weather, "stale": True,
-                "error": "upstream_timeout"
-            }), 200
-        return jsonify({"error": "upstream_timeout"}), 502
+    # 필요한 키들 중 하나라도 stale이면 동기 갱신 시도
+    if (_weather_stale("hourly", TTL_HOURLY_SEC)
+            or _weather_stale("daily", TTL_DAILY_SEC)
+            or _weather_stale("now", TTL_NOW_SEC)):
+        try:
+            refresh_weather_all()
+        except Exception as e:
+            # 실패 시 마지막 정상값이 있으면 stale로 반환
+            if _last_good_weather:
+                payload = {
+                    **_last_good_weather, "stale": True,
+                    "error": "upstream_timeout"
+                }
+                return jsonify(payload), 200
+            return jsonify({"error": "upstream_timeout"}), 502
+
+    payload = {
+        "now": WEATHER_CACHE["now"]["value"],
+        "hourly": WEATHER_CACHE["hourly"]["value"],
+        "daily": WEATHER_CACHE["daily"]["value"],
+        "stale": False
+    }
+    _last_good_weather = payload
+    return jsonify(payload), 200
 
 
 @app.route("/api/daily", strict_slashes=False)
 def api_daily():
-    """일별 예보만 반환. 강제 리프레시: ?force=1"""
+    """
+    일별 예보만 반환.
+    - TTL 초과 시 동기 갱신 시도; 실패 시 마지막 정상 daily로 stale 반환.
+    - 강제 리프레시: ?force=1
+    """
     global _last_good_weather
-    hour_key = datetime.now().strftime("%Y%m%d%H")
     force = request.args.get("force") == "1"
 
-    if force:
-        _cached_weather.cache_clear()
+    if force or _weather_stale("daily", TTL_DAILY_SEC):
+        try:
+            refresh_weather_all()
+        except Exception:
+            pass
 
-    try:
-        _, daily, _ = _cached_weather(hour_key)
-        payload = {"daily": daily, "stale": False}
-        if _last_good_weather:
-            _last_good_weather["daily"] = daily
-            _last_good_weather["stale"] = False
-        return jsonify(payload), 200
-    except Exception:
+    if _weather_stale("daily", TTL_DAILY_SEC):
         if _last_good_weather and "daily" in _last_good_weather:
             return jsonify({
                 "daily": _last_good_weather.get("daily", {}),
@@ -177,8 +254,15 @@ def api_daily():
             }), 200
         return jsonify({"error": "upstream_timeout"}), 502
 
+    payload = {"daily": WEATHER_CACHE["daily"]["value"], "stale": False}
+    # _last_good_weather도 동기화
+    if _last_good_weather:
+        _last_good_weather["daily"] = payload["daily"]
+        _last_good_weather["stale"] = False
+    return jsonify(payload), 200
 
-@app.route('/weathericons/<path:filename>')
+
+@app.route("/weathericons/<path:filename>")
 def serve_icon(filename):
     """정적 아이콘 라우터"""
     return send_from_directory('static/Image/', filename)
@@ -188,6 +272,7 @@ def serve_icon(filename):
 def ai_summary_route():
     force = request.args.get("force") == "1"
 
+    # 최신 스냅샷
     try:
         r = _esp_get("/snapshot")
         r.raise_for_status()
@@ -195,13 +280,22 @@ def ai_summary_route():
     except Exception:
         snapshot = {}
 
-    hour_key = datetime.now().strftime("%Y%m%d%H")
+    # 날씨(캐시에서 가져오거나 필요시 동기 갱신)
     try:
-        hourly, daily, now = _cached_weather(hour_key)
-        weather = {"now": now, "hourly": hourly, "daily": daily}
+        if (_weather_stale("hourly", TTL_HOURLY_SEC)
+                or _weather_stale("daily", TTL_DAILY_SEC)
+                or _weather_stale("now", TTL_NOW_SEC)):
+            refresh_weather_all()
+        weather = {
+            "now": WEATHER_CACHE["now"]["value"],
+            "hourly": WEATHER_CACHE["hourly"]["value"],
+            "daily": WEATHER_CACHE["daily"]["value"],
+        }
     except Exception:
         weather = {"now": {}, "hourly": [], "daily": {}}
 
+    # AI 요약 캐시 키
+    hour_key = datetime.now(KST).strftime("%Y%m%d%H")
     snap_key = _snapshot_sig(snapshot)
     cache_key = f"{hour_key}|{snap_key}"
     now_ts = time.time()
@@ -228,7 +322,7 @@ def __routes():
 def api_ping():
     return jsonify({
         "ok": True,
-        "now": datetime.now().isoformat(timespec="seconds")
+        "now": datetime.now(KST).isoformat(timespec="seconds")
     })
 
 
@@ -236,4 +330,11 @@ def api_ping():
 # 실행 포인트
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    # 서버 부팅 시 1회 즉시 채움 + 프리패치 데몬 시작
+    try:
+        refresh_weather_all()
+    except Exception as e:
+        print("[boot] initial weather fetch failed:", e)
+    start_prefetch_daemon()
+
     app.run(host="0.0.0.0", port=5000, debug=True)

@@ -12,10 +12,12 @@ AUTH_KEY = os.getenv("AUTH_KEY")
 if not AUTH_KEY:
     raise RuntimeError("AUTH_KEY not found in environment. Check .env")
 
-NX, NY = 59, 127  # 동네예보 격자 (마포구 연남동 기준)
-REG_ID_A = "11B00000"  # 중기예보 육상(서울/인천/경기)
-REG_ID_C = "11B10101"  # 중기예보 기온/단기 육상(서울)
+# ── 마포구 연남동 기준 격자/코드 ──────────────────────────────
+NX, NY = 59, 127
+REG_ID_A = "11B00000"  # 중기 육상(수도권)
+REG_ID_C = "11B10101"  # 서울(중기 기온/단기 연계)
 
+# ── 코드 매핑 ────────────────────────────────────────────────
 SKY_MAP = {
     "1": "맑음",
     "2": "구름많음",
@@ -33,15 +35,16 @@ SKY_MAP = {
 PTY_MAP = {
     "0": "없음",
     "1": "비",
-    "4": "비",
     "2": "비/눈",
     "3": "눈",
+    "4": "비",
     "WB00": "없음",
     "WB09": "비",
     "WB11": "비/눈",
     "WB13": "비/눈",
     "WB12": "눈",
 }
+
 KST = timezone(timedelta(hours=9))
 
 
@@ -80,20 +83,29 @@ def http_get(url, timeout=(3.05, 10.0)):
     return _session.get(url, timeout=timeout)
 
 
-def get_base_hourly(now_kst):
-    if now_kst.hour < 2:
-        base_date = (now_kst - timedelta(days=1)).strftime("%Y%m%d")
-        base_time = "2300"
-    else:
-        base_date = now_kst.strftime("%Y%m%d")
-        base_time = "0200"
-    return base_date, base_time
+# ─────────────────────────────────────────────────────────────
+# ※ 변경 1) 단기예보 base_time 계산을 '8개 발표 슬롯' 기준으로 수정
+#    (02,05,08,11,14,17,20,23 중 '현재 시각 이전의 가장 최근 슬롯')
+# ─────────────────────────────────────────────────────────────
+_SHORTTERM_SLOTS = [2, 5, 8, 11, 14, 17, 20, 23]
+
+
+def get_base_hourly(now_kst: datetime):
+    # 현재 시각 이전의 가장 최근 발표 기준시
+    for h in reversed(_SHORTTERM_SLOTS):
+        cand = now_kst.replace(hour=h, minute=0, second=0, microsecond=0)
+        if cand <= now_kst:
+            return cand.strftime("%Y%m%d"), f"{h:02d}00"
+    # 자정~02:00 사이인 경우 전날 23:00
+    prev_day = now_kst - timedelta(days=1)
+    return prev_day.strftime("%Y%m%d"), "2300"
 
 
 # ─────────────────────────────────────────────────────────────
 # hourly
 # ─────────────────────────────────────────────────────────────
 def fetch_vilage_json(base_date_hourly, base_time_hourly):
+    # KMA apihub typ02: authKey 파라미터 사용
     url = (
         "https://apihub.kma.go.kr/api/typ02/openApi/VilageFcstInfoService_2.0/getVilageFcst"
         f"?pageNo=1&numOfRows=2500&dataType=JSON"
@@ -105,51 +117,50 @@ def fetch_vilage_json(base_date_hourly, base_time_hourly):
     return data["response"]["body"]["items"]["item"]
 
 
+# ─────────────────────────────────────────────────────────────
+# ※ 변경 2) hourly 빌드: '현재시각 이후 N시간'을 안정적으로 수집
+#    - TMP/PTY/SKY만 모아 키(fcstDate+fcstTime)별 dict 구성
+#    - now 기준 가장 가까운 슬롯부터 최대 hours_ahead까지
+# ─────────────────────────────────────────────────────────────
 def build_hourly_data(items, now_kst_key, hours_ahead=16):
     if not items:
         return {}
 
     items = sorted(items, key=lambda x: (x["fcstDate"], x["fcstTime"]))
+    # fcst 키 목록(중복 제거 순서 유지)
+    fcst_keys = []
+    seen = set()
+    for it in items:
+        k = it["fcstDate"] + it["fcstTime"]
+        if k not in seen:
+            seen.add(k)
+            fcst_keys.append(k)
 
-    def key_at(idx):
-        return items[idx]["fcstDate"] + items[idx]["fcstTime"]
+    # now 이후의 시작 인덱스
+    start_idx = 0
+    for idx, k in enumerate(fcst_keys):
+        if k >= now_kst_key:
+            start_idx = idx
+            break
 
-    total = len(items)
-    i = 0
-    while i < total and key_at(i) < now_kst_key:
-        i += 1
-    if i == total:
-        i = max(0, total - hours_ahead)
+    fcst_slice = fcst_keys[start_idx:start_idx + hours_ahead]
+    wanted = set(fcst_slice)
 
     hourly_data = {}
-    prev_key = None
-    blocks_done = 0
-
-    while i < total:
-        it = items[i]
-        fcst_key = it["fcstDate"] + it["fcstTime"]
-        category = it["category"]
-
-        if prev_key is None:
-            prev_key = fcst_key
-        elif fcst_key != prev_key:
-            blocks_done += 1
-            if blocks_done >= hours_ahead:
-                break
-            prev_key = fcst_key
-
-        if category == "SKY":
-            value = SKY_MAP.get(it["fcstValue"], it["fcstValue"])
-        elif category == "PTY":
-            value = PTY_MAP.get(it["fcstValue"], it["fcstValue"])
-        elif category == "TMP":
-            value = it["fcstValue"]
-        else:
-            i += 1
+    for it in items:
+        k = it["fcstDate"] + it["fcstTime"]
+        if k not in wanted:
             continue
-
-        hourly_data.setdefault(fcst_key, {})[category] = value
-        i += 1
+        cat = it["category"]
+        if cat == "SKY":
+            val = SKY_MAP.get(it["fcstValue"], it["fcstValue"])
+        elif cat == "PTY":
+            val = PTY_MAP.get(it["fcstValue"], it["fcstValue"])
+        elif cat == "TMP":
+            val = it["fcstValue"]
+        else:
+            continue
+        hourly_data.setdefault(k, {})[cat] = val
 
     return hourly_data
 
@@ -162,6 +173,7 @@ def build_daily_temp_in3day(items, base_time):
         return {}
     daily_data = defaultdict(dict)
     for it in items:
+        # 같은 base_time만 취함(발표 일관성)
         if it.get("baseTime") != base_time:
             continue
         category = it.get("category")
@@ -171,6 +183,7 @@ def build_daily_temp_in3day(items, base_time):
         if not date_key:
             continue
         value = it.get("fcstValue")
+        # 값 덮어쓰기 방지(최초값 우선)
         if category not in daily_data[date_key]:
             daily_data[date_key][category] = value
     return dict(daily_data)
@@ -297,6 +310,7 @@ def build_daily_sky_after3day(base_date):
             continue
 
         daily_data.setdefault(date_key, {})
+        # 같은 파트 중복 방지
         if part not in daily_data[date_key]:
             daily_data[date_key] = {
                 **daily_data[date_key],
@@ -313,6 +327,7 @@ def build_daily_sky_after3day(base_date):
 # 보조
 # ─────────────────────────────────────────────────────────────
 def pick_best_hour_key(hourly_data, preferred_key):
+    """선호키가 있으면 그걸, 없으면 현재 이후 첫 키 또는 마지막 키."""
     if preferred_key in hourly_data:
         return preferred_key
     if not hourly_data:
@@ -329,6 +344,8 @@ def pick_best_hour_key(hourly_data, preferred_key):
 # ─────────────────────────────────────────────────────────────
 def get_weather_data():
     now_kst = datetime.now(KST)
+
+    # (변경) 8개 슬롯 기준으로 base date/time 산출
     base_date, base_time = get_base_hourly(now_kst)
 
     # hourly
@@ -338,25 +355,22 @@ def get_weather_data():
         now_hour = now_kst.strftime("%H00")
         hourly_data = build_hourly_data(vilage_data, now_date + now_hour)
     except Exception:
+        vilage_data = []  # 뒤에서 기온 1~3일 사용 가능하도록 기본값
         hourly_data = {}
 
-    # daily (day1~4)
-    daily_in3day = {}
+    # daily (day1~4): 단기 기온 + 육상(AM/PM SKY/PTY/ST)
     try:
-        daily_temp_in3day = build_daily_temp_in3day(
-            vilage_data if 'vilage_data' in locals() else [], base_time)
+        daily_temp_in3day = build_daily_temp_in3day(vilage_data, base_time)
     except Exception:
         daily_temp_in3day = {}
     try:
         daily_sky_in3day = build_daily_sky_in3day(now_kst.strftime("%Y%m%d"))
     except Exception:
         daily_sky_in3day = {}
-    if daily_temp_in3day or daily_sky_in3day:
-        daily_in3day = merge_daily_temp_sky(daily_temp_in3day,
-                                            daily_sky_in3day)
+    daily_in3day = merge_daily_temp_sky(daily_temp_in3day, daily_sky_in3day) \
+                   if (daily_temp_in3day or daily_sky_in3day) else {}
 
-    # daily (day5~8)
-    daily_after3day = {}
+    # daily (day5~8): 중기 기온 + 육상(AM/PM)
     try:
         daily_temp_after3day = build_daily_temp_after3day(
             now_kst.strftime("%Y%m%d"))
@@ -367,13 +381,12 @@ def get_weather_data():
             now_kst.strftime("%Y%m%d"))
     except Exception:
         daily_sky_after3day = {}
-    if daily_temp_after3day or daily_sky_after3day:
-        daily_after3day = merge_daily_temp_sky(daily_temp_after3day,
-                                               daily_sky_after3day)
+    daily_after3day = merge_daily_temp_sky(daily_temp_after3day, daily_sky_after3day) \
+                      if (daily_temp_after3day or daily_sky_after3day) else {}
 
     daily_data = {**daily_in3day, **daily_after3day}
 
-    # now
+    # now: 단기(hourly)에서 가장 가까운 슬롯 선택
     preferred_key = now_kst.strftime("%Y%m%d%H00")
     best_key = pick_best_hour_key(hourly_data, preferred_key)
 
@@ -392,6 +405,6 @@ def get_weather_data():
     now_obj["TMN"] = daily_data.get(today_key, {}).get("TMN")
 
     print(
-        f"[weather] hourly={len(hourly_data)} slots, daily={len(daily_data)} days, now_key={best_key}, now={now_obj}"
-    )
+        f"[weather] base={base_date} {base_time}, hourly={len(hourly_data)} slots, "
+        f"daily={len(daily_data)} days, now_key={best_key}, now={now_obj}")
     return hourly_data, daily_data, now_obj

@@ -4,12 +4,31 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
     <title>MetaHome | Weather & Indoor Dashboard</title>
+
+    <!-- (선택) 시스템 폰트 스택 백업 -->
+    <style>
+      :root {
+        --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+          Arial, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+      }
+      body { font-family: var(--font-ui); }
+      /* stale 배지 표시/숨김 훅 */
+      .stale-badge[hidden] { display: none; }
+      .weather .is-stale .stale-badge,
+      .days.is-stale .stale-badge { display: inline-block !important; }
+      /* 최고/최저 슬래시는 CSS로 렌더 → 폭 안정 */
+      .temp-highlow .slash::before { content: " / "; opacity: .5; }
+    </style>
+
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Pretendard 사용 시 CDN 교체 필요할 수 있음. 404면 위 시스템 폰트 스택이 적용됩니다. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='global.css') }}"
@@ -45,6 +64,7 @@
             <article class="metric-card">
               <div class="metric-icon">
                 <img
+                  loading="lazy"
                   src="{{ url_for('static', filename='Image/General/Temperature.png') }}"
                   alt="Temperature icon"
                 />
@@ -57,10 +77,12 @@
                 </p>
               </div>
             </article>
+
             <!-- Humidity 측정 카드-->
             <article class="metric-card">
               <div class="metric-icon">
                 <img
+                  loading="lazy"
                   src="{{ url_for('static', filename='Image/General/Water.png') }}"
                   alt="Humidity icon"
                 />
@@ -73,10 +95,12 @@
                 </p>
               </div>
             </article>
+
             <!-- Radiation 측정 카드-->
             <article class="metric-card metric-card--dual">
               <div class="metric-icon">
                 <img
+                  loading="lazy"
                   src="{{ url_for('static', filename='Image/General/Radiation.png') }}"
                   alt="Radiation icon"
                 />
@@ -85,50 +109,47 @@
                 <p class="metric-name">Radiation</p>
                 <div class="metric-values">
                   <div class="metric-row">
-                    <span class="metric-avg">1M avg</span>
+                    <span class="metric-avg">1-min avg</span>
                     <span class="metric-value">
-                      <span id="gamma1m-value"
-                        >{{ snapshot.GammaAverage1m }}</span
-                      >
-                      <span class="unit">uSv/hr</span>
+                      <span id="gamma1m-value">{{ snapshot.GammaAverage1m }}</span>
+                      <span class="unit">µSv/h</span>
                     </span>
                   </div>
                   <div class="metric-row">
-                    <span class="metric-avg">10M avg</span>
+                    <span class="metric-avg">10-min avg</span>
                     <span class="metric-value">
-                      <span id="gamma10m-value"
-                        >{{ snapshot.GammaAverage10m }}</span
-                      >
-                      <span class="unit">uSv/hr</span>
+                      <span id="gamma10m-value">{{ snapshot.GammaAverage10m }}</span>
+                      <span class="unit">µSv/h</span>
                     </span>
                   </div>
                 </div>
               </div>
             </article>
+
             <!-- Dust 측정 카드-->
             <article class="metric-card metric-card--dual">
               <div class="metric-icon">
                 <img
+                  loading="lazy"
                   src="{{ url_for('static', filename='Image/General/Facemask.png') }}"
                   alt="Dust icon"
                 />
               </div>
               <div class="metric-main">
                 <p class="metric-name">Dust</p>
-
                 <div class="metric-values">
                   <div class="metric-row">
                     <span class="metric-avg">PM2.5</span>
                     <span class="metric-value">
                       <span id="pm2_5-value">{{ snapshot.PM2_5 }}</span>
-                      <span class="unit">ug/m3</span>
+                      <span class="unit">µg/m³</span>
                     </span>
                   </div>
                   <div class="metric-row">
                     <span class="metric-avg">PM10</span>
                     <span class="metric-value">
                       <span id="pm10-value">{{ snapshot.PM10 }}</span>
-                      <span class="unit">ug/m3</span>
+                      <span class="unit">µg/m³</span>
                     </span>
                   </div>
                 </div>
@@ -136,6 +157,7 @@
             </article>
           </div>
         </section>
+
         <!-- ai panel -->
         <section class="panel ai-summary" aria-labelledby="aiTitle">
           <h2 id="aiTitle" class="panel-title">AI Summary</h2>
@@ -147,17 +169,21 @@
 
       <!-- Right column: Weather -->
       <section class="panel weather" aria-labelledby="weatherTitle">
+        <h2 id="weatherTitle" class="visually-hidden">Weather</h2>
+
         <div class="weather-top">
           <!-- location -->
           <div class="location-pill">
             <span class="pin">
               <img
+                loading="lazy"
                 src="{{ url_for('static', filename='Image/General/Location.png') }}"
                 alt="Location icon"
               />
             </span>
             <span id="loc-text">서울 마포구</span>
           </div>
+
           <!-- hero = today's weather -->
           <div class="hero">
             <!-- 날짜 -->
@@ -166,13 +192,16 @@
               <div class="date">--</div>
             </div>
 
-            <!-- 날씨 아이콘 -->
+            <!-- 날씨 아이콘 (히어로는 eager) -->
             <div class="icon-block">
               <img id="hero-icon" alt="Weather icon" />
             </div>
 
             <!-- 오른쪽 현재 온도 + 체감온도 -->
             <div class="weather-block">
+              <!-- stale 표시 훅 -->
+              <span class="stale-badge" aria-hidden="true" hidden>STALE</span>
+
               <div class="temp-now">
                 <span class="value">--</span>
                 <span class="label">--</span>
@@ -186,10 +215,14 @@
             </div>
           </div>
         </div>
+
         <!-- hourly data -->
         <div id="hourly" class="hourly"></div>
+
         <!-- days data -->
-        <div class="days" id="days"></div>
+        <div class="days" id="days">
+          <div class="stale-badge" aria-hidden="true" hidden>최근 데이터 표시 중</div>
+        </div>
       </section>
     </main>
 
@@ -198,12 +231,13 @@
       <small>© 2025 MetaHome · Prototype UI</small>
     </footer>
 
-    <script src="{{ url_for('static', filename='js/getIconPath.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/fetchSnapshot.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/time_loc.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/buildHours.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/buildDays.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/buildNow.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/getAISummary.js') }}"></script>
+    <!-- scripts -->
+    <script defer src="{{ url_for('static', filename='js/getIconPath.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/fetchSnapshot.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/time_loc.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/buildHours.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/buildDays.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/buildNow.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='js/getAISummary.js') }}"></script>
   </body>
 </html>
