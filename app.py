@@ -41,10 +41,11 @@ WEATHER_CACHE = {
         "value": {}
     },
 }
-# TTL: 단기 주기(3h) 기준으로 now/hourly는 3시간, daily는 6시간
-TTL_NOW_SEC = 3 * 3600
-TTL_HOURLY_SEC = 3 * 3600
-TTL_DAILY_SEC = 6 * 3600
+# TTL: 프리패치가 0200/2300에만 실행되므로 12시간으로 설정
+# (0200 → 2300 또는 2300 → 0200 간격이 11~13시간)
+TTL_NOW_SEC = 12 * 3600
+TTL_HOURLY_SEC = 12 * 3600
+TTL_DAILY_SEC = 12 * 3600
 
 _last_good_weather = None  # 마지막 정상 응답(전체 페이로드) 저장
 
@@ -71,9 +72,11 @@ def refresh_weather_all():
 
 
 # ─────────────────────────────────────────────────────────────
-# 단기예보 발표 주기 프리패치 스케줄러 (02,05,08,11,14,17,20,23시 +10분)
+# 프리패치 스케줄러 (0200, 2300시 +10분)
+# - daily는 0200/2300만 TMN/TMX 발표
+# - hourly는 16시간치만 사용하므로 0200/2300 발표본으로 충분
 # ─────────────────────────────────────────────────────────────
-_SHORTTERM_SLOTS = [2, 5, 8, 11, 14, 17, 20, 23]
+_PREFETCH_SLOTS = [2, 23]
 _PREFETCH_MINUTE = 10  # 발표 후 10분 여유
 
 
@@ -81,7 +84,7 @@ def _seconds_until_next_shortterm():
     now = datetime.now(KST)
     today_targets = [
         now.replace(hour=h, minute=_PREFETCH_MINUTE, second=0, microsecond=0)
-        for h in _SHORTTERM_SLOTS
+        for h in _PREFETCH_SLOTS
     ]
     future = [t for t in today_targets if t > now]
     nxt = future[0] if future else today_targets[0] + timedelta(days=1)
