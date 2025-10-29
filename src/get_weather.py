@@ -80,6 +80,7 @@ _session.headers.update({"User-Agent": "ESP-Dashboard/1.0 (+local)"})
 
 
 def http_get(url, timeout=(3.05, 10.0)):
+    print(f"[API] {url}")
     return _session.get(url, timeout=timeout)
 
 
