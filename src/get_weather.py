@@ -85,13 +85,14 @@ def http_get(url, timeout=(3.05, 10.0)):
 
 # ─────────────────────────────────────────────────────────────
 # base_time 계산
-# - hourly & daily-3d: 0200 또는 2300 (단기예보 TMN/TMX 정확도 최대)
+# - hourly & daily-3d 기온: 0200 또는 2300 (단기예보 TMN/TMX 정확도 최대)
+# - daily-3d 육상: 전날 1700 (단기예보 육상)
 # - daily-4d~: 0600 또는 1800 (중기예보)
 # ─────────────────────────────────────────────────────────────
 def get_base_shortterm(now_kst: datetime):
     """
-    단기예보 base_time: 0200 또는 2300
-    - hourly와 daily(3일까지) 모두 사용
+    단기예보 기온 base_time: 0200 또는 2300
+    - hourly와 daily(3일까지) TMN/TMX 사용
     - 00~02시: 전날 2300
     - 02~23시: 당일 0200
     - 23~24시: 당일 2300
@@ -107,6 +108,15 @@ def get_base_shortterm(now_kst: datetime):
     else:
         # 02:00~23:00: 당일 0200
         return now_kst.strftime("%Y%m%d"), "0200"
+
+
+def get_base_shortterm_land(now_kst: datetime):
+    """
+    단기예보 육상 base: 전날 1700
+    - daily(3일까지) 육상 예보(SKY, PTY, ST) 사용
+    """
+    prev_day = now_kst - timedelta(days=1)
+    return prev_day.strftime("%Y%m%d"), "1700"
 
 
 def get_base_midterm(now_kst: datetime):
@@ -218,13 +228,19 @@ def build_daily_temp_in3day(items, base_time):
     return dict(daily_data)
 
 
-def build_daily_sky_in3day(base_date):
-    base_dt = datetime.strptime(base_date, "%Y%m%d")
+def build_daily_sky_in3day(forecast_start_date, land_base_date):
+    """
+    단기예보 육상 조회
+    - forecast_start_date: 예보 시작일 (오늘)
+    - land_base_date: 육상 발표 기준일 (전날 1700 발표본)
+    """
+    forecast_dt = datetime.strptime(forecast_start_date, "%Y%m%d")
     url = f"https://apihub.kma.go.kr/api/typ01/url/fct_afs_dl.php?reg={REG_ID_C}&disp=0&authKey={AUTH_KEY}"
     res = http_get(url, timeout=(3.05, 20.0))
     res.raise_for_status()
 
-    want_dates = {(base_dt + timedelta(days=i)).strftime("%Y%m%d")
+    # 예보 날짜는 오늘부터 3일 (오늘, 내일, 모레)
+    want_dates = {(forecast_dt + timedelta(days=i)).strftime("%Y%m%d")
                   for i in range(4)}
     daily_data = {}
 
@@ -235,9 +251,22 @@ def build_daily_sky_in3day(base_date):
         cols = line.split()
         if len(cols) < 16:
             continue
-        TM_EF = cols[2]
-        if len(TM_EF) < 12:
+        
+        # TM_FC: 발표시각 (YYYYMMDDHHMM)
+        # TM_EF: 예보시각 (YYYYMMDDHHMM)
+        TM_FC = cols[1]  # 발표 기준
+        TM_EF = cols[2]  # 예보 대상
+        
+        if len(TM_FC) < 12 or len(TM_EF) < 12:
             continue
+            
+        fc_date = TM_FC[:8]  # 발표일
+        fc_time = TM_FC[8:12]  # 발표시각
+        
+        # 전날 1700 발표본만 사용
+        if fc_date != land_base_date or fc_time != "1700":
+            continue
+        
         date_key, hhmm = TM_EF[:8], TM_EF[-4:]
         if date_key not in want_dates or hhmm not in ("0000", "1200"):
             continue
@@ -391,13 +420,16 @@ def get_weather_data():
     except Exception:
         hourly_data = {}
 
-    # daily (day1~3): 단기예보에서 TMX, TMN 추출 + 육상(AM/PM SKY/PTY/ST)
+    # daily (day1~3): 단기예보에서 TMX, TMN 추출
     try:
         daily_temp_in3day = build_daily_temp_in3day(vilage_data, base_time)
     except Exception:
         daily_temp_in3day = {}
+    
+    # daily (day1~3): 단기예보 육상(AM/PM SKY/PTY/ST) - 전날 1700 발표본
+    land_base_date, land_base_time = get_base_shortterm_land(now_kst)
     try:
-        daily_sky_in3day = build_daily_sky_in3day(now_kst.strftime("%Y%m%d"))
+        daily_sky_in3day = build_daily_sky_in3day(now_kst.strftime("%Y%m%d"), land_base_date)
     except Exception:
         daily_sky_in3day = {}
     daily_in3day = merge_daily_temp_sky(daily_temp_in3day, daily_sky_in3day) \
@@ -475,6 +507,7 @@ def get_weather_data():
 
     print(
         f"[weather] shortterm_base={base_date} {base_time}, "
+        f"land_base={land_base_date} {land_base_time}, "
         f"midterm_base={midterm_base_date} {midterm_base_time}, "
         f"hourly={len(hourly_data)} slots, daily={len(daily_data)} days, "
         f"now_key={best_key}, now={now_obj}")
