@@ -13,8 +13,8 @@
 ### 1.2 시스템 개요
 
 - **센서 측정**: AM2320(온습도), PM-G7(먼지), GDK101(방사능)
-- **MCU 제어 및 표시**: Wemos D1 mini(ESP8266) + ST7789V TFT (320×240)
-- **디스플레이 인터페이스**: ESP8266 **HSPI(SPI)** ↔ ST7789V (MISO 미사용)
+- **MCU 제어 및 표시**: Wemos D1 mini(ESP8266) + ST7789V(2.0”)
+- **디스플레이 인터페이스**: ESP8266 ↔ ST7789V
 - **서버 연동**: Flask 서버(현재 Replit 호스팅)와 HTTP 통신
 - **웹 대시보드 표시**: 실내 센서값 + 외부 날씨 + **AI 요약(application/json)** 제공
 - **원격 접속**: ESP8266은 STA 모드로 공유기에 연결 후 포트포워딩으로 외부 접근 허용
@@ -22,9 +22,9 @@
 
 ### 1.3 범위
 
-- **하드웨어**: Wemos D1 mini, ST7789V(2.0”), AM2320, PM-G7, GDK101
+- **하드웨어**: Wemos D1 mini, ST7789V, AM2320, PM-G7, GDK101
 - **소프트웨어**: Arduino IDE (ESP8266 Core 3.0.2), Python Flask 3.x (Replit)
-- **버스 인터페이스**: **SPI(HSPI)** for ST7789V / **I²C** for AM2320·GDK101 / UART(SoftSerial) for PM-G7
+- **버스 인터페이스**: **SPI(HSPI)** for ST7789V / **I²C** for AM2320·GDK101 / **UART(SoftSerial)** for PM-G7
 - **기능**: 센서 데이터 수집/시각화, Flask 연동, JSON/텍스트 송수신, AI 요약 생성
 - **제외**: 장기 데이터 저장(DB), 클라우드 업로드
 
@@ -39,18 +39,17 @@
 | F1 | 온도, 습도, PM2.5, PM10, 방사능(1m/10m) 측정 | AM2320, PM-G7, GDK101 |
 | F2 | 2초 주기로 센서 갱신 | `millis()` 기반 비차단 방식 |
 | F3 | Flask 서버에 HTTP 요청 | `/api/weather`, `/ai-summary`, `/snapshot` |
-| F4 | ST7789V TFT 표시 | 카드형 레이아웃, 좌측 시계 |
+| F4 | ST7789V 표시 | 카드형 레이아웃, 좌측 시계 |
 | F5 | JSON 포맷 통신 | `{ "Temperature":24.5, ... }` |
 | F6 | Wi-Fi 연결(AP/STA) | `WiFi.softAP()`, `WiFi.begin()` |
 | F7 | 원격 접근 (포트포워딩) | WAN→LAN |
-| F8 | AI 요약 생성(application/json) | OpenAI API, JSON 문자열 응답 |
-| **F9** | ST7789V를 **SPI(HSPI)** 로 구동 | `Adafruit_ST7789` |
+| F8 | 날씨 예보 | 기상청 API, JSON or text 응답 |
+| F9 | AI 요약 생성(application/json) | OpenAI API, JSON 문자열 응답 |
 
 ### 2.2 비기능 요구사항
 
 | 항목 | 설명 |
 | --- | --- |
-| 성능 | TFT 갱신 ≤1s, Flask 응답 ≤2s |
 | 신뢰성 | HTTP 재시도(지수 백오프), 센서 미응답 시 이전 값 유지 |
 | 확장성 | 센서 클래스 구조로 신규 추가 용이 |
 | 유지보수성 | 버스(HAL) 모듈화, 상수 정의 분리 |
@@ -122,28 +121,14 @@
 | --- | --- | --- |
 | `buildNow.js` | 현재 날씨 표시 | 10분 캐시, TMN/TMX 폴백 로직 |
 | `buildHours.js` | 시간별 예보 | 최대 18시간, 현재 시각부터 표시 |
-| `buildDays.js` | 일별 예보 | /api/daily 우선, /api/weather 폴백 |
-| `getAISummary.js` | AI 요약 로드 | JSON 문자열/객체 모두 처리 |
-
-**공통 아키텍처 패턴**
-1. **구조**: 상수 → 헬퍼 함수 → 메인 함수 → 실행
-2. **스코프 격리**: IIFE `(function() { ... })()`로 전역 오염 방지
-3. **defer 호환성**: `document.readyState` 확인으로 안전한 초기화
-   ```javascript
-   if (document.readyState === "loading") {
-     document.addEventListener("DOMContentLoaded", buildFunction);
-   } else {
-     buildFunction();  // DOM 준비 완료 시 즉시 실행
-   }
-   ```
-4. **에러 처리**: `fetchWithRetry()` 재시도 로직, try-catch 방어
-5. **온도 표시**: 모든 섹션에서 **최저/최고** 순서 통일
+| `buildDays.js` | 일별 예보 | /api/daily |
+| `getAISummary.js` | AI 요약 로드 | JSON 문자열 처리 |
 
 ---
 
 ## 6. Weather Adapter (KMA)
 
-- 단기·중기 예보 통합 → `{ now, hourly[], daily{} }` 구조
+- 단기·중기 예보 통합 → `{ now, hourly, daily }` 구조
 - 비JSON 응답 파싱 및 숫자 정규화
 - 캐시: `@lru_cache(maxsize=1)` + `_last_good_weather`
 - 실패 시 이전 정상값 반환(`stale:true`)
@@ -158,9 +143,6 @@
   - 02:10: hourly(02~17시), daily(0200 TMN/TMX)
   - 14:10: hourly(14~익일05시), daily(0200 TMN/TMX 유지)
   - 23:10: hourly(23~익일14시), daily(2300 TMN/TMX)
-- **폴백 로직**: API 에러나 데이터 누락 시 hourly 데이터에서 계산
-- 클라이언트(buildNow.js)에서도 now.TMX/TMN이 없으면 daily 데이터로 보강
-- 모든 UI에서 **최저/최고** 순서로 통일하여 일관성 유지
 
 ---
 
@@ -176,7 +158,6 @@
   - `typeof data === "string"` → 텍스트 렌더링
   - `typeof data === "object"` → JSON 객체 렌더링 (summary + tips)
 - 캐시 TTL = 5분
-- 브라우저 호환성: `replace(/pattern/g)` 사용 (replaceAll 미지원 대응)
 
 ---
 
@@ -198,14 +179,14 @@
 | 비밀키 | Replit Secrets 활용 |
 | 배포 | Arduino IDE (74880 bps), Replit Flask Cloud |
 | 모니터링 | 센서 오류·HTTP 지연·캐시 상태 로그 |
-| 노이즈대응 | SPI선 짧게 / 주파수 조절(40→27 MHz) |
 
 ---
 
 ## 10. 향후 개선 로드맵
 
 - [ ]  라이트/다크 테마 전환 (TFT 팔레트 토글)
-- [ ]  AI 요약 지침 템플릿 외부화
+- [ ]  기상청 초단기예보 API 활용
+- [ ]  AI 요약 지침 템플릿 다양화
 
 ---
 
