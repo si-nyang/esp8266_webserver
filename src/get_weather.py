@@ -92,16 +92,20 @@ def get_base_shortterm(now_kst: datetime):
     """
     단기예보 base_time: 0200 또는 2300
     - hourly와 daily(3일까지) 모두 사용
-    - 현재 시각이 02시 이전이면 전날 2300 발표본 사용
-    - 그 외에는 당일 0200 발표본 사용
+    - 00~02시: 전날 2300
+    - 02~23시: 당일 0200
+    - 23~24시: 당일 2300
     """
     current_hour = now_kst.hour
     if current_hour < 2:
-        # 자정~02:00 사이: 전날 2300
+        # 자정~02:00: 전날 2300
         prev_day = now_kst - timedelta(days=1)
         return prev_day.strftime("%Y%m%d"), "2300"
+    elif current_hour >= 23:
+        # 23:00~24:00: 당일 2300
+        return now_kst.strftime("%Y%m%d"), "2300"
     else:
-        # 02:00 이후: 당일 0200
+        # 02:00~23:00: 당일 0200
         return now_kst.strftime("%Y%m%d"), "0200"
 
 
@@ -109,16 +113,20 @@ def get_base_midterm(now_kst: datetime):
     """
     중기예보 base_time: 0600 또는 1800
     - daily(4일 이후) 사용
-    - 현재 시각이 06시 이전이면 어제 1800 발표본 사용
-    - 그 외에는 당일 0600 발표본 사용
+    - 00~06시: 어제 1800
+    - 06~18시: 당일 0600
+    - 18~24시: 당일 1800
     """
     current_hour = now_kst.hour
     if current_hour < 6:
-        # 자정~06:00 사이: 어제 1800
+        # 자정~06:00: 어제 1800
         prev_day = now_kst - timedelta(days=1)
         return prev_day.strftime("%Y%m%d"), "1800"
+    elif current_hour >= 18:
+        # 18:00~24:00: 당일 1800
+        return now_kst.strftime("%Y%m%d"), "1800"
     else:
-        # 06:00 이후: 당일 0600
+        # 06:00~18:00: 당일 0600
         return now_kst.strftime("%Y%m%d"), "0600"
 
 
