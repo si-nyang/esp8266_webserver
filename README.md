@@ -154,9 +154,6 @@
   ```json
   "현재 실내 온도는 24.4℃로 쾌적한 상태이며..."
   ```
-- 클라이언트 처리: 
-  - `typeof data === "string"` → 텍스트 렌더링
-  - `typeof data === "object"` → JSON 객체 렌더링 (summary + tips)
 - 캐시 TTL = 5분
 
 ---
@@ -198,26 +195,27 @@
 |  | GDK101 VCC | 전원 (5V) | 방사능 센서 전원 |
 |  | PM-G7 VCC | 전원 (5V) | 먼지 센서 전원 |
 | **3V3** | ST7789V VCC, BL | 전원 (3.3V) | 디스플레이 전원 및 백라이트 |
-| **G (GND)** | USB-TTL GND | 공통 접지 |  |
-|  | AM2320 GND |  |  |
+| **G (GND)** | AM2320 GND | 공통 접지 |  |
 |  | GDK101 GND |  |  |
 |  | PM-G7 GND |  |  |
-|  | ST7789V GND |  | 모든 장치 공통 GND |
+|  | ST7789V GND |  |  |
 | **D0 (GPIO16)** | ST7789V RST | Reset | 디스플레이 리셋 핀 |
-| **D1 (GPIO5)** | AM2320 SCL, GDK101 SCL | I²C SCL | I²C 클록 |
-| **D2 (GPIO4)** | AM2320 SDA, GDK101 SDA | I²C SDA | I²C 데이터 |
+| **D1 (GPIO5)** | AM2320 SCL | I²C SCL | I²C 클록 |
+|  | GDK101 SCL | I²C SCL | I²C 클록 |
+| **D2 (GPIO4)** | AM2320 SDA | I²C SDA | I²C 데이터 |
+|  | GDK101 SDA | I²C SDA | I²C 데이터 |
 | **D3 (GPIO0)** | PM-G7 TX | UART RX (SoftwareSerial) | Dust 센서 데이터 입력 |
-| **D4 (GPIO2)** | ST7789V DC | SPI DC / Data-Command | 부트 시 HIGH 필요 |
+| **D4 (GPIO2)** | ST7789V DC | SPI DC / Data-Command |  |
 | **D5 (GPIO14)** | ST7789V SCK | SPI Clock | HSPI SCLK |
 | **D6 (GPIO12)** | — | (미사용) | SPI MISO (ST7789V에서는 불필요) |
 | **D7 (GPIO13)** | ST7789V DIN | SPI MOSI | HSPI 데이터 출력 |
-| **D8 (GPIO15)** | ST7789V CS | SPI Chip-Select | 부트 시 LOW 필요 (기본 Pull-down) |
+| **D8 (GPIO15)** | ST7789V CS | SPI Chip-Select |  |
 | **RST** | — | MCU Reset | 보드 리셋 시 전체 재시작 |
 | **A0** | — | 아날로그 입력(미사용) |  |
 
 | 버스 | 구성요소 | 핀 | 설명 |
 | --- | --- | --- | --- |
-| **SPI (HSPI)** | ST7789V | D5(SCK), D7(DIN), D8(CS), D4(DC), D0(RST) | 고속 표시용 (27–40 MHz) |
+| **SPI (HSPI)** | ST7789V | D5(SCK), D7(DIN), D8(CS), D4(DC), D0(RST) |  |
 | **I²C** | AM2320, GDK101 | D1(SCL), D2(SDA) | 온습도 및 방사능 센서 |
 | **UART (SWSerial)** | PM-G7 | D3(TX → RX) | 미세먼지 측정 센서 |
 | **전원** | 5V / 3.3V / GND | — | ST7789은 3.3 V |
