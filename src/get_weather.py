@@ -361,25 +361,26 @@ def pick_best_hour_key(hourly_data, preferred_key):
 def get_weather_data():
     now_kst = datetime.now(KST)
 
-    # hourly용 base time (0200 또는 2300)
-    base_date_hourly, base_time_hourly = get_base_hourly(now_kst)
+    # hourly와 daily 모두 동일한 base time 사용 (0200 또는 2300)
+    base_date, base_time = get_base_time(now_kst)
+
+    # 단기예보 데이터 fetch (hourly와 daily 모두 사용)
+    try:
+        vilage_data = fetch_vilage_json(base_date, base_time)
+    except Exception:
+        vilage_data = []
 
     # hourly
     try:
-        vilage_data_hourly = fetch_vilage_json(base_date_hourly, base_time_hourly)
         now_date = now_kst.strftime("%Y%m%d")
         now_hour = now_kst.strftime("%H00")
-        hourly_data = build_hourly_data(vilage_data_hourly, now_date + now_hour)
+        hourly_data = build_hourly_data(vilage_data, now_date + now_hour)
     except Exception:
         hourly_data = {}
 
-    # daily용 base time (0200 또는 2300만 사용 - TMN/TMX 정확도 향상)
-    base_date_daily, base_time_daily = get_base_daily(now_kst)
-
     # daily (day1~4): 단기 기온 + 육상(AM/PM SKY/PTY/ST)
     try:
-        vilage_data_daily = fetch_vilage_json(base_date_daily, base_time_daily)
-        daily_temp_in3day = build_daily_temp_in3day(vilage_data_daily, base_time_daily)
+        daily_temp_in3day = build_daily_temp_in3day(vilage_data, base_time)
     except Exception:
         daily_temp_in3day = {}
     try:
@@ -459,8 +460,7 @@ def get_weather_data():
                 daily_data[today_key]["TMX"] = calculated_max
 
     print(
-        f"[weather] hourly_base={base_date_hourly} {base_time_hourly}, "
-        f"daily_base={base_date_daily} {base_time_daily}, "
+        f"[weather] base={base_date} {base_time}, "
         f"hourly={len(hourly_data)} slots, daily={len(daily_data)} days, "
         f"now_key={best_key}, now={now_obj}")
     return hourly_data, daily_data, now_obj
