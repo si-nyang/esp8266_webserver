@@ -1,13 +1,11 @@
 (function () {
-  // ─────────────────────────────────────────────────────────
-  // 설정: 클라이언트 캐시 TTL (ms). 단기예보 기반이니 10분이면 충분.
-  // 서버는 3시간 단위로 프리패치하므로, 여기 값은 UI 빈도만 조절.
+  // ===== 상수 =====
   const CLIENT_TTL_MS = 10 * 60 * 1000; // 10분
 
-  // ── 내부 메모리 캐시 ──────────────────────────────────────
+  // ===== 내부 캐시 =====
   const _cache = { weather: { at: 0, data: null } };
 
-  // ---- 유틸: 재시도 fetch ----
+  // ===== 헬퍼 함수 =====
   async function fetchWithRetry(url, tries = 2) {
     let lastErr;
     for (let i = 0; i < tries; i++) {
@@ -23,7 +21,6 @@
     throw lastErr;
   }
 
-  // ---- 유틸: 날짜 포맷 (예: Sunday, 04 Aug, 2025) ----
   function formatHeroDate(d) {
     const weekday = d.toLocaleDateString("en-US", { weekday: "long" });
     const day = String(d.getDate()).padStart(2, "0");
@@ -32,13 +29,11 @@
     return { weekday, dateText: `${day} ${mon}, ${year}` };
   }
 
-  // ---- 숫자 안전 처리 ----
   const toInt = (v) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.round(n) : null;
   };
 
-  // ---- 아이콘 경로 (전역 getIconPath 있으면 우선) ----
   function pickIcon(sky, pty, hour) {
     const customFn =
       (typeof window !== "undefined" && window.getIconPath) ||
@@ -67,7 +62,6 @@
     return `${baseDir}/${name}.png`;
   }
 
-  // ── 클라이언트 캐시되는 /api/weather 가져오기 ────────────
   async function getWeatherCached() {
     const now = Date.now();
     if (_cache.weather.data && now - _cache.weather.at < CLIENT_TTL_MS) {
@@ -78,25 +72,21 @@
     return data;
   }
 
-  // ── UI 빌드: NOW 블럭 ────────────────────────────────────
+  // ===== 메인 함수 =====
   async function buildNow() {
-    // 엘리먼트
     const weekdayEl = document.querySelector(".date-block .weekday");
     const dateEl = document.querySelector(".date-block .date");
     const iconEl = document.getElementById("hero-icon");
-
     const tempNowEl = document.querySelector(".weather-block .temp-now .value");
     const nowLabelEl = document.querySelector(".weather-block .temp-now .label");
     const tMinEl = document.querySelector(".weather-block .temp-highlow .low");
     const tMaxEl = document.querySelector(".weather-block .temp-highlow .high");
-    const staleBadgeEl = document.querySelector(".weather-block .stale-badge"); // 선택
-    const lastUpdatedEl = document.querySelector(".last-updated"); // 선택
+    const staleBadgeEl = document.querySelector(".weather-block .stale-badge");
+    const lastUpdatedEl = document.querySelector(".last-updated");
     const weatherBlock = document.querySelector(".weather-block");
 
-    // 필수 요소 확인
     if (!weekdayEl || !dateEl || !iconEl || !tempNowEl || !tMaxEl || !tMinEl) return;
 
-    // 날짜 표시
     const nowLocal = new Date();
     const { weekday, dateText } = formatHeroDate(nowLocal);
     weekdayEl.textContent = weekday;
@@ -106,7 +96,6 @@
       const data = await getWeatherCached();
       if (data.error) throw new Error(data.error);
 
-      // stale 뱃지 / 클래스
       const isStale = !!data.stale;
       if (staleBadgeEl) staleBadgeEl.style.display = isStale ? "" : "none";
       if (weatherBlock) {
@@ -114,12 +103,10 @@
       }
 
       const nowObj = data.now || {};
-      // 현재 온도
       const tNow = toInt(nowObj.TMP);
       tempNowEl.textContent = tNow !== null ? `${tNow}°` : "--";
       if (nowLabelEl) nowLabelEl.textContent = "NOW";
 
-      // 최고/최저: now.TMX/TMN 우선, 없으면 daily[오늘] 보강
       let tmx = toInt(nowObj.TMX);
       let tmn = toInt(nowObj.TMN);
 
@@ -137,7 +124,6 @@
       tMinEl.textContent = tmn !== null ? `${tmn}°` : "--";
       tMaxEl.textContent = tmx !== null ? `${tmx}°` : "--";
 
-      // 아이콘 (이미지 에러 시 fallback)
       const hour = nowLocal.getHours();
       const src = pickIcon(nowObj.SKY, nowObj.PTY, hour);
       iconEl.onerror = () => {
@@ -146,7 +132,6 @@
       };
       iconEl.src = src;
 
-      // 마지막 갱신 표기(선택)
       if (lastUpdatedEl) {
         const ts = new Date(_cache.weather.at);
         const hh = String(ts.getHours()).padStart(2, "0");
@@ -164,8 +149,7 @@
     }
   }
 
+  // ===== 실행 =====
   document.addEventListener("DOMContentLoaded", buildNow);
-
-  // 필요 시 주기적 업데이트(클라이언트 TTL과 비슷하게)
   setInterval(buildNow, CLIENT_TTL_MS);
 })();
