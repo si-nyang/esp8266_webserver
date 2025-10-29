@@ -46,8 +46,12 @@
       const justDateA = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
       const justDateB = new Date(targetDt.getFullYear(), targetDt.getMonth(), targetDt.getDate());
       const diff = Math.round((justDateB - justDateA) / 86400000);
-      const lead = diff === 1 ? "내일 " : K_WEEK[targetDt.getDay()] + " ";
-      return `${lead}${String(targetDt.getHours()).padStart(2, "0")}시`;
+      
+      // 00시만 "내일" 또는 "요일" 표시, 나머지는 시간만
+      if (targetDt.getHours() === 0) {
+        const lead = diff === 1 ? "내일" : K_WEEK[targetDt.getDay()];
+        return lead;
+      }
     }
     return `${String(targetDt.getHours()).padStart(2, "0")}시`;
   }
