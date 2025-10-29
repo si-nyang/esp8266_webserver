@@ -172,5 +172,9 @@
   }
 
   // ===== 실행 =====
-  document.addEventListener("DOMContentLoaded", buildHours);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", buildHours);
+  } else {
+    buildHours();
+  }
 })();

@@ -150,6 +150,10 @@
   }
 
   // ===== 실행 =====
-  document.addEventListener("DOMContentLoaded", buildNow);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", buildNow);
+  } else {
+    buildNow();
+  }
   setInterval(buildNow, CLIENT_TTL_MS);
 })();

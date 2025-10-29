@@ -171,5 +171,9 @@
   }
 
   // ===== 실행 =====
-  document.addEventListener("DOMContentLoaded", buildDays);
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", buildDays);
+  } else {
+    buildDays();
+  }
 })();
