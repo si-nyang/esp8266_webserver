@@ -229,14 +229,18 @@ def build_daily_temp_in3day(items, base_time):
     return dict(daily_data)
 
 
-def build_daily_sky_in3day(forecast_start_date, land_base_date):
+def build_daily_sky_in3day(forecast_start_date, land_base_date, land_base_time):
     """
     단기예보 육상 조회
     - forecast_start_date: 예보 시작일 (오늘)
-    - land_base_date: 육상 발표 기준일 (전날 1700 발표본)
+    - land_base_date: 육상 발표 기준일 (전날)
+    - land_base_time: 육상 발표 시각 (1700)
     """
     forecast_dt = datetime.strptime(forecast_start_date, "%Y%m%d")
-    url = f"https://apihub.kma.go.kr/api/typ01/url/fct_afs_dl.php?reg={REG_ID_C}&disp=0&authKey={AUTH_KEY}"
+    
+    # tmfc1, tmfc2: 발표시각 (YYYYMMDDHH)
+    tmfc = land_base_date + land_base_time[:2]  # 20251028 + 17 = 2025102817
+    url = f"https://apihub.kma.go.kr/api/typ01/url/fct_afs_dl.php?reg={REG_ID_C}&disp=0&tmfc1={tmfc}&tmfc2={tmfc}&authKey={AUTH_KEY}"
     res = http_get(url, timeout=(3.05, 20.0))
     res.raise_for_status()
 
@@ -430,7 +434,7 @@ def get_weather_data():
     # daily (day1~3): 단기예보 육상(AM/PM SKY/PTY/ST) - 전날 1700 발표본
     land_base_date, land_base_time = get_base_shortterm_land(now_kst)
     try:
-        daily_sky_in3day = build_daily_sky_in3day(now_kst.strftime("%Y%m%d"), land_base_date)
+        daily_sky_in3day = build_daily_sky_in3day(now_kst.strftime("%Y%m%d"), land_base_date, land_base_time)
     except Exception:
         daily_sky_in3day = {}
     daily_in3day = merge_daily_temp_sky(daily_temp_in3day, daily_sky_in3day) \
