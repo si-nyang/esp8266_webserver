@@ -16,7 +16,7 @@
 - **MCU 제어 및 표시**: Wemos D1 mini(ESP8266) + ST7789V(2.0”)
 - **디스플레이 인터페이스**: ESP8266 ↔ ST7789V
 - **서버 연동**: Flask 서버(현재 Replit 호스팅)와 HTTP 통신
-- **웹 대시보드 표시**: 실내 센서값 + 외부 날씨 + **AI 요약(application/json)** 제공
+- **웹 대시보드 표시**: 실내 센서값 + 외부 날씨 + AI 요약(application/json) 제공
 - **원격 접속**: ESP8266은 STA 모드로 공유기에 연결 후 포트포워딩으로 외부 접근 허용
 - **단일 스케치 구조**: 센서 드라이버, UI, 네트워크 통신이 하나의 `.ino`에 통합됨
 
@@ -85,9 +85,9 @@
 | `st7789v.h` | SPI 핀·색상·좌표 상수 |
 | `src/get_weather.py` | Weather Adapter (KMA API + 캐시) |
 | `src/get_ai_summary.py` | AI 요약 생성 (OpenAI API) |
-| `static/js/buildNow.js` | 현재 날씨 UI 렌더링 (캐시 10분) |
-| `static/js/buildHours.js` | 시간별 예보 UI 렌더링 (최대 18시간) |
-| `static/js/buildDays.js` | 일별 예보 UI 렌더링 (fallback 지원) |
+| `static/js/buildNow.js` | 현재 날씨 UI 렌더링 |
+| `static/js/buildHours.js` | 시간별 예보 UI 렌더링 |
+| `static/js/buildDays.js` | 일별 예보 UI 렌더링 |
 | `static/js/getAISummary.js` | AI 요약 로드 및 표시 |
 
 ### 5.2 스케줄링
@@ -132,9 +132,8 @@
 - 비JSON 응답 파싱 및 숫자 정규화
 - 캐시: `@lru_cache(maxsize=1)` + `_last_good_weather`
 - 실패 시 이전 정상값 반환(`stale:true`)
-- **API 호출 모니터링**: 모든 기상청 API 호출 시 URL 로그 출력
 
-### 6.1 데이터 소스별 Base Time 전략
+### 6.1 데이터 소스별 Base Time
 
 **단기예보 기온 (TMN/TMX)**
 - API: `VilageFcstInfoService_2.0/getVilageFcst`
@@ -148,7 +147,6 @@
 - API: `fct_afs_dl.php`
 - Base Time: **전날 1700** (tmfc1/tmfc2 파라미터)
 - 용도: daily(3일까지 AM/PM 하늘상태, 강수형태, 강수확률)
-- 특징: 응답 데이터를 TM_FC로 필터링하여 정확한 발표본 사용
 
 **중기예보 (4일 이후)**
 - API: `fct_afs_wc.php` (기온), `fct_afs_wl.php` (육상)
@@ -158,7 +156,7 @@
   - 18~24시: 당일 1800
 - 용도: daily(4일~8일 예보)
 
-### 6.2 캐시 및 프리패치 전략
+### 6.2 캐시 및 프리패치
 
 **캐시 TTL**
 - hourly: 12시간 (단기예보 0200↔2300 간격)
@@ -171,11 +169,6 @@
 - **12:10**: 점심 시간대 전체 갱신 (사용자 피크)
 - **18:10**: 중기예보 1800 (daily-4d~)
 - **23:10**: 단기예보 2300 (hourly + daily-3d 기온)
-
-**API 효율성**
-- 단기예보: 1회 호출로 hourly + daily-3d 공유
-- 중기예보: 기온/육상 각 1회씩 호출
-- now 엔드포인트: 캐시 재계산으로 추가 API 호출 없음
 
 ---
 
