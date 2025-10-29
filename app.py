@@ -25,7 +25,7 @@ password = 'esp12f'
 # ─────────────────────────────────────────────────────────────
 # Weather 캐시 (엔드포인트별 TTL + 프리패치)
 # ─────────────────────────────────────────────────────────────
-# now/hourly는 단기예보 기반(3시간 주기), daily는 중기(06/18시)지만
+# hourly/daily는 단기예보 기반(0200/2300 발표), now는 hourly/daily 조합
 # 한 번의 get_weather_data() 호출로 모두 갱신함.
 WEATHER_CACHE = {
     "now": {
@@ -41,9 +41,10 @@ WEATHER_CACHE = {
         "value": {}
     },
 }
-# TTL: 프리패치가 0200/2300에만 실행되므로 12시간으로 설정
-# (0200 → 2300 또는 2300 → 0200 간격이 11~13시간)
-TTL_NOW_SEC = 12 * 3600
+# TTL 설정:
+# - hourly/daily: 12시간 (0200 → 2300 또는 2300 → 0200 간격 11~13시간)
+# - now: 1시간 (hourly/daily 기반으로 최신 상태 유지)
+TTL_NOW_SEC = 1 * 3600
 TTL_HOURLY_SEC = 12 * 3600
 TTL_DAILY_SEC = 12 * 3600
 
@@ -55,6 +56,11 @@ def _set_weather_cache(hourly, daily, now):
     WEATHER_CACHE["hourly"] = {"t": ts, "value": hourly}
     WEATHER_CACHE["daily"] = {"t": ts, "value": daily}
     WEATHER_CACHE["now"] = {"t": ts, "value": now}
+
+
+def _update_now_cache(now):
+    """now만 업데이트 (hourly/daily 기반 재계산 시 사용)"""
+    WEATHER_CACHE["now"] = {"t": time.time(), "value": now}
 
 
 def _weather_stale(key: str, ttl: int) -> bool:
@@ -71,13 +77,51 @@ def refresh_weather_all():
     # _last_good_weather 업데이트는 라우트에서 만들 때 같이 반영
 
 
+def _recalc_now_from_cache():
+    """
+    캐시된 hourly/daily에서 now를 재계산 (API 호출 없이)
+    hourly/daily가 없으면 예외 발생
+    """
+    from src.get_weather import pick_best_hour_key
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    
+    hourly_data = WEATHER_CACHE["hourly"]["value"]
+    daily_data = WEATHER_CACHE["daily"]["value"]
+    
+    if not hourly_data or not daily_data:
+        raise ValueError("hourly or daily cache empty")
+    
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    now_date = now_kst.strftime("%Y%m%d")
+    now_hour = now_kst.strftime("%H00")
+    preferred_key = now_date + now_hour
+    best_key = pick_best_hour_key(hourly_data, preferred_key)
+    
+    now_obj = {}
+    if best_key and best_key in hourly_data:
+        now_obj["TMP"] = hourly_data[best_key].get("TMP")
+        now_obj["SKY"] = hourly_data[best_key].get("SKY")
+        now_obj["PTY"] = hourly_data[best_key].get("PTY")
+    else:
+        now_obj["TMP"] = None
+        now_obj["SKY"] = None
+        now_obj["PTY"] = None
+    
+    now_obj["TMX"] = daily_data.get(now_date, {}).get("TMX")
+    now_obj["TMN"] = daily_data.get(now_date, {}).get("TMN")
+    
+    _update_now_cache(now_obj)
+    return now_obj
+
+
 # ─────────────────────────────────────────────────────────────
-# 프리패치 스케줄러 (0200, 1400, 2300시 +10분)
-# - 0200: hourly(02~17시), daily(TMN/TMX) 갱신
-# - 1400: hourly(14~익일05시), daily(당일 0200 TMN/TMX 유지)
-# - 2300: hourly(23~익일14시), daily(TMN/TMX) 갱신
+# 프리패치 스케줄러 (0210, 1210, 2310 - 3회/일)
+# - 02:10 → 0200 발표본: hourly+daily (TMN/TMX 포함)
+# - 12:10 → 0200 발표본: hourly+daily (0200 TMN/TMX 유지)
+# - 23:10 → 2300 발표본: hourly+daily (TMN/TMX 갱신)
 # ─────────────────────────────────────────────────────────────
-_PREFETCH_SLOTS = [2, 14, 23]
+_PREFETCH_SLOTS = [2, 12, 23]
 _PREFETCH_MINUTE = 10  # 발표 후 10분 여유
 
 
@@ -194,34 +238,41 @@ def getSnapshotHandler():
 def api_weather():
     """
     (hourly, daily, now) 묶음 반환.
-    - 캐시가 TTL 초과면 즉시 갱신 시도(동기), 실패 시 마지막 정상값 반환.
+    - hourly/daily가 stale이면 API 호출
+    - now만 stale이면 hourly/daily에서 재계산 (API 호출 없음)
     - 강제 리프레시: ?force=1
     """
     global _last_good_weather
     force = request.args.get("force") == "1"
 
     if force:
-        # 강제 새로고침
+        # 강제 새로고침 (API 호출)
         try:
             refresh_weather_all()
         except Exception:
             pass
-
-    # 필요한 키들 중 하나라도 stale이면 동기 갱신 시도
-    if (_weather_stale("hourly", TTL_HOURLY_SEC)
-            or _weather_stale("daily", TTL_DAILY_SEC)
-            or _weather_stale("now", TTL_NOW_SEC)):
-        try:
-            refresh_weather_all()
-        except Exception as e:
-            # 실패 시 마지막 정상값이 있으면 stale로 반환
-            if _last_good_weather:
-                payload = {
-                    **_last_good_weather, "stale": True,
-                    "error": "upstream_timeout"
-                }
-                return jsonify(payload), 200
-            return jsonify({"error": "upstream_timeout"}), 502
+    else:
+        # hourly 또는 daily가 stale이면 API 호출
+        if (_weather_stale("hourly", TTL_HOURLY_SEC)
+                or _weather_stale("daily", TTL_DAILY_SEC)):
+            try:
+                refresh_weather_all()
+            except Exception as e:
+                # 실패 시 마지막 정상값이 있으면 stale로 반환
+                if _last_good_weather:
+                    payload = {
+                        **_last_good_weather, "stale": True,
+                        "error": "upstream_timeout"
+                    }
+                    return jsonify(payload), 200
+                return jsonify({"error": "upstream_timeout"}), 502
+        # now만 stale이면 캐시에서 재계산 (API 호출 없음)
+        elif _weather_stale("now", TTL_NOW_SEC):
+            try:
+                _recalc_now_from_cache()
+            except Exception:
+                # 재계산 실패 시 현재 캐시 그대로 사용
+                pass
 
     payload = {
         "now": WEATHER_CACHE["now"]["value"],
@@ -286,10 +337,16 @@ def ai_summary_route():
 
     # 날씨(캐시에서 가져오거나 필요시 동기 갱신)
     try:
+        # hourly 또는 daily가 stale이면 API 호출
         if (_weather_stale("hourly", TTL_HOURLY_SEC)
-                or _weather_stale("daily", TTL_DAILY_SEC)
-                or _weather_stale("now", TTL_NOW_SEC)):
+                or _weather_stale("daily", TTL_DAILY_SEC)):
             refresh_weather_all()
+        # now만 stale이면 캐시에서 재계산 (API 호출 없음)
+        elif _weather_stale("now", TTL_NOW_SEC):
+            try:
+                _recalc_now_from_cache()
+            except Exception:
+                pass
         weather = {
             "now": WEATHER_CACHE["now"]["value"],
             "hourly": WEATHER_CACHE["hourly"]["value"],
